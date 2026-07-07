@@ -1,0 +1,12 @@
+plugins {
+    id 'symera.plugins.extension' apply false
+}
+
+ext {
+    extName = 'PelisPlusPh'
+    extClass = '.Pelisplusph'
+    themePkg = 'pelisplus'
+    overrideVersionCode = 82
+}
+
+apply plugin: "symera.plugins.extension"

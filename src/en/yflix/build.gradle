@@ -1,0 +1,12 @@
+plugins {
+    id 'symera.plugins.extension' apply false
+}
+
+ext {
+    extName = 'YFlix'
+    extClass = '.YFlix'
+    themePkg = 'yflixtheme'
+    overrideVersionCode = 1
+}
+
+apply plugin: "symera.plugins.extension"

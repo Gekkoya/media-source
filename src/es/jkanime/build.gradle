@@ -1,0 +1,23 @@
+plugins {
+    id 'symera.plugins.extension' apply false
+}
+
+ext {
+    extName = 'Jkanime'
+    extClass = '.Jkanime'
+    extVersionCode = 1
+}
+
+apply plugin: "symera.plugins.extension"
+
+dependencies {
+    implementation(project(':lib:dood'))
+    implementation(project(':lib:okru'))
+    implementation(project(':lib:mixdrop'))
+    implementation(project(':lib:mp4upload'))
+    implementation(project(':lib:filemoon'))
+    implementation(project(':lib:streamtape'))
+    implementation(project(':lib:voe'))
+    implementation(project(':lib:vidhide'))
+    implementation(project(':lib:universal'))
+}
