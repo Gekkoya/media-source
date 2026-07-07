@@ -1,0 +1,35 @@
+name: Feature request
+description: Request an improvement to an existing extension
+labels: [Feature request]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Source name
+      placeholder: Example: ExtensionName
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: Describe the feature
+      placeholder: Explain what should be added or improved.
+    validations:
+      required: true
+
+  - type: textarea
+    id: other-details
+    attributes:
+      label: Other details
+      placeholder: Add examples, links, screenshots, or behavior from another app.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This request is for an extension, not the Symera app itself.
+          required: true

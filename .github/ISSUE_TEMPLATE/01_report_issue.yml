@@ -1,0 +1,85 @@
+name: Issue report
+description: Report a broken Symera source extension
+labels: [Bug]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Extension information
+      description: Include the extension name and version shown in the app.
+      placeholder: Example: ExtensionName 2.1 Spanish
+    validations:
+      required: true
+
+  - type: input
+    id: language
+    attributes:
+      label: Extension language
+      placeholder: Example: Spanish
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce-steps
+    attributes:
+      label: Steps to reproduce
+      description: Be specific and include a title/movie/series/episode when possible.
+      placeholder: |
+        1. Open the extension
+        2. Search for a title
+        3. Open an episode
+        4. Error appears
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      placeholder: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behavior
+      placeholder: What happened instead?
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: Symera app version
+      placeholder: Example: 1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: android-version
+    attributes:
+      label: Android version
+      placeholder: Example: Android 14
+    validations:
+      required: true
+
+  - type: textarea
+    id: other-details
+    attributes:
+      label: Other details
+      placeholder: Add screenshots, logs, source URLs, or WebView notes here.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I updated Symera and all installed extensions before reporting.
+          required: true
+        - label: I tested the source website in a browser or WebView.
+          required: true
+        - label: This is an extension issue, not an app issue.
+          required: true

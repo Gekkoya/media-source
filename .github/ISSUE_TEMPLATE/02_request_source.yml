@@ -1,0 +1,57 @@
+name: Source request
+description: Request a new media source extension
+labels: [Source request]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Source name
+      placeholder: Example: Not Real Source
+    validations:
+      required: true
+
+  - type: input
+    id: link
+    attributes:
+      label: Source URL
+      placeholder: Example: https://example.org
+    validations:
+      required: true
+
+  - type: input
+    id: language
+    attributes:
+      label: Source language
+      placeholder: Example: Spanish
+    validations:
+      required: true
+
+  - type: dropdown
+    id: content-type
+    attributes:
+      label: Content type
+      options:
+        - Movies
+        - Series
+        - Movies and series
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: other-details
+    attributes:
+      label: Other details
+      placeholder: Add NSFW status, account requirements, region locks, or extractor notes.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I searched existing issues and this request is not a duplicate.
+          required: true
+        - label: I checked that this extension does not already exist in the repo.
+          required: true
+        - label: The website is reachable in a normal browser.
+          required: true

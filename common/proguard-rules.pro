@@ -20,7 +20,7 @@
 }
 
 ## Symera extension runtime rules
--keep class org.symera.mediaextension.** { public <init>(); }
+-keep class org.symera.mediasource.** { public <init>(); }
 -keep class org.symera.source.** { *; }
 
 # Rhino references optional JVM desktop APIs that are not available on Android.

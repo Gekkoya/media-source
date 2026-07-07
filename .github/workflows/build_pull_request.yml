@@ -1,0 +1,165 @@
+name: PR check
+
+on:
+  pull_request:
+    paths:
+      - '**'
+      - '!**.md'
+      - '!.github/**'
+      - '.github/scripts/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CI_CHUNK_SIZE: 15
+  IS_PR_CHECK: true
+
+jobs:
+  quality:
+    name: Format, build-logic and core tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'tools platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: true
+          add-job-summary: on-failure
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Run checks
+        run: ./gradlew spotlessCheck :core:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-quality-reports
+          path: '**/build/reports/'
+          if-no-files-found: ignore
+          retention-days: 7
+
+  prepare:
+    name: Prepare build matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      delete: ${{ steps.matrix.outputs.delete }}
+      has_modules: ${{ steps.matrix.outputs.has_modules }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.base_ref }} --depth=1
+
+      - name: Show lib version bump impact
+        run: |
+          changed_libs=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'lib/**' ':!lib/**.md' || true)
+          if [ -n "$changed_libs" ]; then
+            python ./.github/scripts/bump-versions.py --dry-run $changed_libs
+          else
+            echo "No lib changes detected."
+          fi
+
+      - id: matrix
+        name: Generate build matrix
+        run: python ./.github/scripts/generate-build-matrices.py origin/${{ github.base_ref }} Debug
+
+  build:
+    name: Build extensions (${{ matrix.chunk.number }})
+    needs: [quality, prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: needs.prepare.outputs.has_modules == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'tools platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: true
+          add-job-summary: on-failure
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Prepare signing key
+        if: env.SIGNING_KEY != ''
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          printf '%s' "$SIGNING_KEY" | base64 -d > signingkey.jks
+          chmod 600 signingkey.jks
+
+      - name: Build extensions
+        env:
+          MODULES: ${{ join(matrix.chunk.modules, ' ') }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          MEGACLOUD_API: ${{ secrets.MEGACLOUD_API }}
+          KISSKH_API: ${{ secrets.KISSKH_API }}
+          KISSKH_SUB_API: ${{ secrets.KISSKH_SUB_API }}
+          KAISVA: ${{ secrets.KAISVA }}
+          TMDB_API: ${{ secrets.TMDB_API }}
+        run: ./gradlew $MODULES --no-daemon --stacktrace
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-apks-${{ matrix.chunk.number }}
+          path: '**/*.apk'
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f signingkey.jks

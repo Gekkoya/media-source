@@ -1,0 +1,45 @@
+name: URL change report
+description: Report that an existing source moved to a new domain
+labels: [Bug, Domain changed]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Extension information
+      placeholder: Example: ExtensionName 2.1 Spanish
+    validations:
+      required: true
+
+  - type: input
+    id: old-url
+    attributes:
+      label: Old URL
+      placeholder: Example: https://old.example.org
+    validations:
+      required: true
+
+  - type: input
+    id: new-url
+    attributes:
+      label: New URL
+      placeholder: Example: https://new.example.org
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      placeholder: Add redirect screenshots, official announcement links, or WebView notes.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I verified the old URL no longer works correctly.
+          required: true
+        - label: I verified the new URL works in a browser.
+          required: true
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

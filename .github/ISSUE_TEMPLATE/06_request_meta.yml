@@ -1,0 +1,27 @@
+name: Meta request
+description: Suggest repository, tooling, or policy improvements
+labels: [Meta request]
+body:
+  - type: textarea
+    id: request
+    attributes:
+      label: Describe the request
+      placeholder: Explain what should change and why.
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Extra context
+      placeholder: Add examples, alternatives, or implementation notes.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This request belongs in the extensions repository.
+          required: true

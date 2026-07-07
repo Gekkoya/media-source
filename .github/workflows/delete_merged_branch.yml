@@ -1,0 +1,24 @@
+name: Delete merged branch
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Delete branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          case "$BRANCH" in
+            main|master|repo) echo "Protected branch skipped: $BRANCH"; exit 0 ;;
+          esac
+          gh api -X DELETE "repos/${REPOSITORY}/git/refs/heads/${BRANCH}"

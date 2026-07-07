@@ -14,38 +14,38 @@ import okio.buffer
 import okio.source
 import java.io.InputStream
 
-val mediaExtensionJson: Json = Json {
+val mediaSourceJson: Json = Json {
     isLenient = true
     ignoreUnknownKeys = true
     explicitNulls = false
 }
 
-val jsonInstance: Json = mediaExtensionJson
+val jsonInstance: Json = mediaSourceJson
 
 val JSON_MEDIA_TYPE = "application/json".toMediaType()
 
-inline fun <reified T> String.parseAs(json: Json = mediaExtensionJson): T = json.decodeFromString(serializer(), this)
+inline fun <reified T> String.parseAs(json: Json = mediaSourceJson): T = json.decodeFromString(serializer(), this)
 
-inline fun <reified T> String.parseAs(json: Json = mediaExtensionJson, transform: (String) -> String): T = transform(this).parseAs(json)
+inline fun <reified T> String.parseAs(json: Json = mediaSourceJson, transform: (String) -> String): T = transform(this).parseAs(json)
 
-inline fun <reified T> Response.parseAs(json: Json = mediaExtensionJson): T = use {
+inline fun <reified T> Response.parseAs(json: Json = mediaSourceJson): T = use {
     json.decodeFromBufferedSource(serializer(), it.body.source())
 }
 
-inline fun <reified T> Response.parseAs(json: Json = mediaExtensionJson, transform: (String) -> String): T = use {
+inline fun <reified T> Response.parseAs(json: Json = mediaSourceJson, transform: (String) -> String): T = use {
     it.body.string().parseAs(json, transform)
 }
 
-inline fun <reified T> JsonElement.parseAs(json: Json = mediaExtensionJson): T = json.decodeFromJsonElement(serializer(), this)
+inline fun <reified T> JsonElement.parseAs(json: Json = mediaSourceJson): T = json.decodeFromJsonElement(serializer(), this)
 
-inline fun <reified T> InputStream.parseAs(json: Json = mediaExtensionJson): T = use {
+inline fun <reified T> InputStream.parseAs(json: Json = mediaSourceJson): T = use {
     json.decodeFromBufferedSource(serializer(), it.source().buffer())
 }
 
-inline fun <reified T> T.toJsonString(json: Json = mediaExtensionJson): String = json.encodeToString(serializer(), this)
+inline fun <reified T> T.toJsonString(json: Json = mediaSourceJson): String = json.encodeToString(serializer(), this)
 
 fun String.toJsonBody(): RequestBody = toRequestBody(JSON_MEDIA_TYPE)
 
-inline fun <reified T> T.toJsonRequestBody(json: Json = mediaExtensionJson): RequestBody = toJsonString(json).toJsonBody()
+inline fun <reified T> T.toJsonRequestBody(json: Json = mediaSourceJson): RequestBody = toJsonString(json).toJsonBody()
 
-inline fun <reified T> T.toJsonElement(json: Json = mediaExtensionJson): JsonElement = json.encodeToJsonElement(serializer(), this)
+inline fun <reified T> T.toJsonElement(json: Json = mediaSourceJson): JsonElement = json.encodeToJsonElement(serializer(), this)
