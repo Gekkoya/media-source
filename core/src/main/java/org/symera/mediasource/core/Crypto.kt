@@ -1,0 +1,59 @@
+package org.symera.mediasource.core
+
+fun String.decodeHex(): ByteArray {
+    require(length % 2 == 0) { "Unexpected hex string: $this" }
+
+    val result = ByteArray(length / 2)
+    for (i in result.indices) {
+        val d1 = decodeHexDigit(this[i * 2]) shl 4
+        val d2 = decodeHexDigit(this[i * 2 + 1])
+        result[i] = (d1 + d2).toByte()
+    }
+    return result
+}
+
+fun String.decodeHexToString(): String = decodeHex().toString(Charsets.UTF_8)
+
+fun ByteArray.toHex(): String = joinToString(separator = "") { eachByte -> "%02x".format(eachByte) }
+
+fun String.toHex(): String = toByteArray().toHex()
+
+private fun decodeHexDigit(c: Char): Int = when (c) {
+    in '0'..'9' -> c - '0'
+    in 'a'..'f' -> c - 'a' + 10
+    in 'A'..'F' -> c - 'A' + 10
+    else -> throw IllegalArgumentException("Unexpected hex digit: $c")
+}
+
+fun rc4(key: ByteArray, data: ByteArray, skip: Int = 0): ByteArray {
+    require(key.isNotEmpty()) { "RC4 key must not be empty" }
+    require(key.size <= 256) { "RC4 key must not exceed 256 bytes, got ${key.size}" }
+    require(skip >= 0) { "RC4 skip must be non-negative, got $skip" }
+    val s = IntArray(256) { it }
+    var j = 0
+    for (i in 0..255) {
+        j = (j + s[i] + (key[i % key.size].toInt() and 0xFF)) and 0xFF
+        val t = s[i]
+        s[i] = s[j]
+        s[j] = t
+    }
+    var a = 0
+    var b = 0
+    repeat(skip) {
+        a = (a + 1) and 0xFF
+        b = (b + s[a]) and 0xFF
+        val t = s[a]
+        s[a] = s[b]
+        s[b] = t
+    }
+    val out = ByteArray(data.size)
+    for (i in data.indices) {
+        a = (a + 1) and 0xFF
+        b = (b + s[a]) and 0xFF
+        val t = s[a]
+        s[a] = s[b]
+        s[b] = t
+        out[i] = ((data[i].toInt() and 0xFF) xor s[(s[a] + s[b]) and 0xFF]).toByte()
+    }
+    return out
+}
