@@ -1,4 +1,4 @@
-package org.symera.mediasource.es.pelisplusto
+package org.symera.mediasource.es.tioplusapp
 
 import android.util.Base64
 import kotlinx.serialization.json.JsonObject
@@ -24,9 +24,9 @@ import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.asJsoup
 
-class Pelisplusto : PelisPlus() {
+class TioPlusApp : PelisPlus() {
 
-    override val name = "PelisPlusTo"
+    override val name = "TioPlusApp"
     override val baseUrl = "https://tioplus.app"
 
     override fun moviesRequest(page: Int): Request = GET("$baseUrl/peliculas?page=$page", headers)

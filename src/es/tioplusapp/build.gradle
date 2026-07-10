@@ -3,10 +3,10 @@ plugins {
 }
 
 ext {
-    extName = 'PelisPlusTo'
-    extClass = '.Pelisplusto'
+    extName = 'TioPlusApp'
+    extClass = '.TioPlusApp'
     themePkg = 'pelisplus'
-    overrideVersionCode = 82
+    overrideVersionCode = 83
 }
 
 apply plugin: "symera.plugins.extension"

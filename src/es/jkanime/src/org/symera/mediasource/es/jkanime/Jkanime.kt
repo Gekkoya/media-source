@@ -242,7 +242,13 @@ class Jkanime :
             episodeNumber = episode.number.toDouble()
             title = "Episodio ${episode.number}"
             airDate = episode.timestamp?.toDate() ?: 0L
-            thumbnailUrl = episode.image
+            thumbnailUrl = episode.image?.let { img ->
+                if (img.startsWith("http://") || img.startsWith("https://")) {
+                    img
+                } else {
+                    CDN_THUMBNAIL_BASE + img
+                }
+            }
             setUrlWithoutDomain("$animeUrl/${episode.number}")
         }
     }
@@ -412,6 +418,8 @@ class Jkanime :
     private val universalExtractor by lazy { UniversalExtractor(client) }
 
     companion object {
+        private const val CDN_THUMBNAIL_BASE = "https://cdn.jkdesa.com/assets/images/animes/video/image_thumb/"
+
         private const val PREF_LANGUAGE_KEY = "preferred_language"
         private const val PREF_LANGUAGE_DEFAULT = "[JAP]"
         private val LANGUAGE_LIST = listOf("[JAP]", "[LAT]")
