@@ -226,23 +226,14 @@ class Jkanime :
             add("Cookie", xsrfToken.joinToString(" ") { "${it.substringBeforeLast(";")};" })
         }.build()
 
-        val playableItems = mutableListOf<SPlayableItem>()
-        val episodesPage = fetchAnimeEpisodes(animeId, 1, cookieHeaders, formData)
-        episodesPage.data.toPlayableItemList(animeUrl).let(playableItems::addAll)
-
-        val firstEpisode = episodesPage.from ?: return playableItems.reversed()
-        val lastEpisode = episodesPage.total + firstEpisode - 1
-        val lastLoadedEpisode = episodesPage.to ?: firstEpisode + episodesPage.data.size - 1
-        for (i in lastLoadedEpisode + 1..lastEpisode) {
-            playableItems.add(
-                SPlayableItem.create().apply {
-                    setUrlWithoutDomain("$animeUrl/$i")
-                    title = "Episodio $i"
-                    episodeNumber = i.toDouble()
-                },
-            )
+        val playableItems = buildList {
+            var page = 1
+            do {
+                val episodesPage = fetchAnimeEpisodes(animeId, page, cookieHeaders, formData)
+                addAll(episodesPage.data.toPlayableItemList(animeUrl))
+                page++
+            } while (!episodesPage.nextPageUrl.isNullOrBlank() && page <= episodesPage.lastPage)
         }
-
         return playableItems.reversed()
     }
 
