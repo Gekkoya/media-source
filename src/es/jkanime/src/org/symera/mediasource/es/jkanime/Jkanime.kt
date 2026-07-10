@@ -230,9 +230,10 @@ class Jkanime :
         val episodesPage = fetchAnimeEpisodes(animeId, 1, cookieHeaders, formData)
         episodesPage.data.toPlayableItemList(animeUrl).let(playableItems::addAll)
 
-        val firstEpisode = episodesPage.from
+        val firstEpisode = episodesPage.from ?: return playableItems.reversed()
         val lastEpisode = episodesPage.total + firstEpisode - 1
-        for (i in episodesPage.to + 1..lastEpisode) {
+        val lastLoadedEpisode = episodesPage.to ?: firstEpisode + episodesPage.data.size - 1
+        for (i in lastLoadedEpisode + 1..lastEpisode) {
             playableItems.add(
                 SPlayableItem.create().apply {
                     setUrlWithoutDomain("$animeUrl/$i")
@@ -250,6 +251,7 @@ class Jkanime :
             episodeNumber = episode.number.toDouble()
             title = "Episodio ${episode.number}"
             airDate = episode.timestamp?.toDate() ?: 0L
+            thumbnailUrl = episode.image
             setUrlWithoutDomain("$animeUrl/${episode.number}")
         }
     }

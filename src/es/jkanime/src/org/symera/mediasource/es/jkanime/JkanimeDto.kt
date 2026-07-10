@@ -25,8 +25,8 @@ data class EpisodesPageDto(
     @SerialName("current_page") val currentPage: Int,
     @SerialName("last_page") val lastPage: Int,
     @SerialName("next_page_url") val nextPageUrl: String? = null,
-    val from: Int,
-    val to: Int,
+    val from: Int? = null,
+    val to: Int? = null,
     val total: Int,
 )
 

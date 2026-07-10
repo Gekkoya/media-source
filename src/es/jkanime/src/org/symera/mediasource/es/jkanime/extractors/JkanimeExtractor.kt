@@ -58,8 +58,15 @@ class JkanimeExtractor(private val client: OkHttpClient) {
 
     fun getMagiFromUrl(url: String, prefix: String = ""): List<SStream> {
         val document = client.newCall(GET(url)).execute().asJsoup()
-        val videoUrl = document.selectFirst("""source[src*=".m3u8"]""")?.attr("src") ?: return emptyList()
-        return listOf(SStream(url = videoUrl, title = "${prefix}Magi", initialized = true))
+        val videoUrl = document.selectFirst("""source[src*=".m3u8"]""")?.attr("abs:src") ?: return emptyList()
+        return listOf(
+            SStream(
+                url = videoUrl,
+                title = "${prefix}Magi",
+                headers = Headers.Builder().add("Referer", url).build(),
+                initialized = true,
+            ),
+        )
     }
 
     fun getMediafireFromUrl(url: String, prefix: String = ""): List<SStream> {
