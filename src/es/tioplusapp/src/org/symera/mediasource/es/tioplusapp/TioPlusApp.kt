@@ -2,6 +2,7 @@ package org.symera.mediasource.es.tioplusapp
 
 import android.util.Base64
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -109,6 +110,15 @@ class TioPlusApp : PelisPlus() {
                     this.title = "T$season - E$episodeNumber - $title"
                     this.episodeNumber = index.toDouble()
                     seasonNumber = season.toDoubleOrNull()
+                    thumbnailUrl = episode["image"]?.jsonPrimitive?.contentOrNull
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { image ->
+                            if (image.startsWith("http://") || image.startsWith("https://")) {
+                                image
+                            } else {
+                                "https://image.tmdb.org/t/p/w342$image"
+                            }
+                        }
                 }
             }
         }.reversed()

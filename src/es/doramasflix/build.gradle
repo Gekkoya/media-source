@@ -1,0 +1,21 @@
+plugins {
+    id 'symera.plugins.extension' apply false
+}
+
+ext {
+    extName = 'Doramasflix'
+    extClass = '.Doramasflix'
+    extVersionCode = 2
+}
+
+apply plugin: "symera.plugins.extension"
+
+dependencies {
+    implementation(project(':lib:dood'))
+    implementation(project(':lib:streamtape'))
+    implementation(project(':lib:voe'))
+    implementation(project(':lib:streamwish'))
+    implementation(project(':lib:filemoon'))
+    implementation(project(':lib:streamlare'))
+    implementation(project(':lib:universal'))
+}
