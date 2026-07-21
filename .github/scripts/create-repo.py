@@ -83,7 +83,7 @@ for apk in sorted(apk_dir.glob("*.apk")):
         {
             "name": LABEL_REGEX.search(badging).group(1),
             "pkg": package_name,
-            "apk": apk.name,
+            "apk": f"apk/{apk.name}",
             "lang": language.group(1) if language else package_name.split(".")[-2],
             "code": int(version_code),
             "version": version_name,
@@ -125,5 +125,5 @@ with (repo_dir / "index.html").open("w", encoding="utf-8") as file:
     for item in index:
         apk = html.escape(item["apk"])
         name = html.escape(item["name"])
-        file.write(f"<a href=\"apk/{apk}\">{name}</a>\n")
+        file.write(f"<a href=\"{apk}\">{name}</a>\n")
     file.write("</pre></body></html>\n")
