@@ -234,6 +234,10 @@ jobs:
           packages: 'tools platform-tools platforms;android-36 build-tools;36.0.0'
 
       - name: Create repo artifacts
+        env:
+          SYMERA_REPO_NAME: Symera Media Extensions
+          SYMERA_REPO_SHORT_NAME: Symera
+          SYMERA_REPO_WEBSITE: https://github.com/${{ vars.GEKKOYA_REPO_REPOSITORY }}
         run: |
           cd source
           python ./.github/scripts/move-built-apks.py

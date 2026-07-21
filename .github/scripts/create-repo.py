@@ -1,4 +1,5 @@
 import html
+import hashlib
 import json
 import os
 import re
@@ -10,13 +11,30 @@ PACKAGE_REGEX = re.compile(r"package: name='([^']+)'.*versionCode='([^']+)'.*ver
 LABEL_REGEX = re.compile(r"^application-label:'([^']+)'", re.MULTILINE)
 ICON_REGEX = re.compile(r"^application-icon-\d+:'([^']+)'", re.MULTILINE)
 META_REGEX = re.compile(r"name='(?P<name>symera\.extension\.[^']+)' value='(?P<value>[^']*)'")
+MANIFEST_META_NAME_REGEX = re.compile(r'A: android:name\([^)]*\)="(?P<name>symera\.extension\.[^"]+)"')
+MANIFEST_META_STRING_VALUE_REGEX = re.compile(r'A: android:value\([^)]*\)="(?P<value>[^"]*)"')
+MANIFEST_META_HEX_VALUE_REGEX = re.compile(r"0x(?P<value>[0-9a-fA-F]+)\s*$")
 APK_LANGUAGE_REGEX = re.compile(r"^symera-([^-]+)-")
 SHA256_DIGEST_REGEX = re.compile(r"SHA-256 digest:\s*([0-9a-fA-F:]+)")
 
-android_home = Path(os.environ["ANDROID_HOME"])
+android_home_value = os.environ.get("ANDROID_HOME")
+android_home = Path(android_home_value) if android_home_value else None
+if android_home is None or not android_home.is_dir():
+    local_properties = Path("local.properties")
+    sdk_dir = next(
+        (
+            line.partition("=")[2].replace("\\:", ":").replace("\\\\", "\\")
+            for line in local_properties.read_text("utf-8").splitlines()
+            if line.startswith("sdk.dir=")
+        ),
+        "",
+    ) if local_properties.is_file() else ""
+    android_home = Path(sdk_dir) if sdk_dir else None
+if android_home is None or not android_home.is_dir():
+    raise RuntimeError("ANDROID_HOME or local.properties sdk.dir must reference an Android SDK")
 build_tools = sorted((android_home / "build-tools").iterdir())[-1]
-aapt = build_tools / "aapt"
-apksigner = build_tools / "apksigner"
+aapt = build_tools / ("aapt.exe" if os.name == "nt" else "aapt")
+apksigner = build_tools / ("apksigner.bat" if os.name == "nt" else "apksigner")
 
 repo_dir = Path("repo")
 apk_dir = repo_dir / "apk"
@@ -26,6 +44,22 @@ icon_dir.mkdir(parents=True, exist_ok=True)
 index = []
 signing_key_fingerprints = set()
 
+
+def extension_metadata(apk: Path, badging: str) -> dict[str, str]:
+    metadata = {match.group("name"): match.group("value") for match in META_REGEX.finditer(badging)}
+    manifest = subprocess.check_output([aapt, "dump", "xmltree", apk, "AndroidManifest.xml"]).decode()
+    manifest_lines = manifest.splitlines()
+    for index, line in enumerate(manifest_lines[:-1]):
+        name = MANIFEST_META_NAME_REGEX.search(line)
+        if not name:
+            continue
+        value_line = manifest_lines[index + 1]
+        if value := MANIFEST_META_STRING_VALUE_REGEX.search(value_line):
+            metadata[name.group("name")] = value.group("value")
+        elif value := MANIFEST_META_HEX_VALUE_REGEX.search(value_line):
+            metadata[name.group("name")] = str(int(value.group("value"), 16))
+    return metadata
+
 for apk in sorted(apk_dir.glob("*.apk")):
     badging = subprocess.check_output([aapt, "dump", "--include-meta-data", "badging", apk]).decode()
     certs = subprocess.check_output([apksigner, "verify", "--print-certs", apk]).decode()
@@ -34,7 +68,7 @@ for apk in sorted(apk_dir.glob("*.apk")):
 
     package_line = next(line for line in badging.splitlines() if line.startswith("package: "))
     package_name, version_code, version_name = PACKAGE_REGEX.search(package_line).groups()
-    metadata = {match.group("name"): match.group("value") for match in META_REGEX.finditer(badging)}
+    metadata = extension_metadata(apk, badging)
 
     icon_match = ICON_REGEX.search(badging)
     icon_name = f"{package_name}.png"
@@ -43,6 +77,8 @@ for apk in sorted(apk_dir.glob("*.apk")):
             target.write(source.read())
 
     language = APK_LANGUAGE_REGEX.search(apk.name)
+    with apk.open("rb") as source:
+        apk_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
     index.append(
         {
             "name": LABEL_REGEX.search(badging).group(1),
@@ -53,8 +89,9 @@ for apk in sorted(apk_dir.glob("*.apk")):
             "version": version_name,
             "nsfw": metadata.get("symera.extension.nsfw", "false") in {"1", "true", "True"},
             "sourceSdk": int(metadata.get("symera.extension.sdk", "0") or 0),
-            "extClass": metadata.get("symera.extension.class", ""),
+            "extClass": metadata.get("symera.extension.factory", ""),
             "icon": f"icon/{icon_name}" if icon_match else None,
+            "apkSha256": apk_sha256,
             "sources": [],
         }
     )

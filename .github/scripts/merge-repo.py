@@ -6,7 +6,10 @@ from pathlib import Path
 
 remote_repo = Path.cwd()
 local_repo = remote_repo.parent / sys.argv[2]
-to_delete: list[str] = json.loads(sys.argv[1])
+try:
+    to_delete: list[str] = json.loads(sys.argv[1])
+except json.JSONDecodeError:
+    to_delete = [module for module in sys.argv[1].split(",") if module]
 
 for module in to_delete:
     apk_pattern = f"symera-{module.replace('.', '-')}-v*.apk"
@@ -18,6 +21,7 @@ for module in to_delete:
 
 shutil.copytree(local_repo / "apk", remote_repo / "apk", dirs_exist_ok=True)
 shutil.copytree(local_repo / "icon", remote_repo / "icon", dirs_exist_ok=True)
+shutil.copy2(local_repo / "synapse.json", remote_repo / "synapse.json")
 
 remote_index_path = remote_repo / "index.json"
 remote_index = json.loads(remote_index_path.read_text("utf-8")) if remote_index_path.is_file() else []

@@ -56,14 +56,15 @@ class PluginExtension : Plugin<Project> {
             defaultConfig {
                 val lang = project.parent?.name ?: "all"
                 applicationId = "org.symera.mediasource.$lang.${project.name}"
-                versionCode = if (theme == null) extInt("extVersionCode") else theme.baseVersionCode + extInt("overrideVersionCode")
-                versionName = "2.$versionCode"
+                val extensionVersion = if (theme == null) extInt("extVersionCode") else theme.baseVersionCode + extInt("overrideVersionCode")
+                versionCode = SDK_VERSION_CODE_OFFSET + extensionVersion
+                versionName = "4.$extensionVersion"
                 base {
                     archivesName.set("symera-$lang-${project.name}-v$versionName")
                 }
                 manifestPlaceholders += mapOf(
                     "appName" to "Symera: $extensionName",
-                    "extClass" to extensionClass,
+                    "extClass" to "$applicationId$extensionClass",
                     "sourceSdk" to symeraCatalog.versions.source.sdk.get(),
                     "nsfw" to extBoolean("isNsfw"),
                 )
@@ -177,6 +178,7 @@ private const val MEGACLOUD_API_DEFAULT = "https://script.google.com/macros/s/AK
 private const val KISSKH_API_DEFAULT = "https://script.google.com/macros/s/AKfycbzn8B31PuDxzaMa9_CQ0VGEDasFqfzI5bXvjaIZH4DM8DNq9q6xj1ALvZNz_JT3jF0suA/exec?id="
 private const val KISSKH_SUB_API_DEFAULT = "https://script.google.com/macros/s/AKfycbyq6hTj0ZhlinYC6xbggtgo166tp6XaDKBCGtnYk8uOfYBUFwwxBui0sGXiu_zIFmA/exec?id="
 private const val KAISVA_DEFAULT = "https://c-kai-8090.amarullz.com"
+private const val SDK_VERSION_CODE_OFFSET = 400_000
 
 private fun Project.buildConfigString(name: String, defaultValue: String = ""): String {
     val value = providers.environmentVariable(name).orNull ?: defaultValue
