@@ -2,6 +2,9 @@ package org.symera.mediasource.lib.dood
 
 import okhttp3.Headers
 import okhttp3.OkHttpClient
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
 import org.symera.source.online.GET
@@ -44,12 +47,11 @@ class DoodExtractor(private val client: OkHttpClient) {
                 ),
             ).execute().body.string()
             val videoUrl = "$videoUrlStart$randomString?token=$token&expiry=$expiry"
-            SStream(
-                url = videoUrl,
+            PlayableStream(
+                id = videoUrl,
                 title = streamTitle,
-                headers = doodHeaders(doodHost),
+                request = MediaRequest(uri = videoUrl, headers = doodHeaders(doodHost).toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
                 subtitleTracks = externalSubs,
-                initialized = true,
             )
         }.getOrNull()
     }

@@ -23,11 +23,12 @@ import org.symera.mediasource.core.bodyString
 import org.symera.mediasource.core.parseAs
 import org.symera.mediasource.core.toJsonRequestBody
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
+import org.symera.source.model.MediaRequest
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
+import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import org.symera.source.online.POST
-import org.symera.source.online.awaitSuccess
 import kotlin.coroutines.resume
 
 class RapidShareExtractor(private val client: OkHttpClient, private val headers: Headers, private val context: Application? = null) {
@@ -52,7 +53,7 @@ class RapidShareExtractor(private val client: OkHttpClient, private val headers:
         try {
             val parsedUrl = url.toHttpUrl()
             val iframeHeaders = headers.newBuilder().set("User-Agent", headers["User-Agent"] ?: DEFAULT_USER_AGENT).set("Referer", url).build()
-            val html = client.newCall(GET(url, iframeHeaders)).awaitSuccess().bodyString()
+            val html = client.awaitSuccess(GET(url, iframeHeaders)).bodyString()
             val realUrl = Regex("""<iframe[^>]+src=["']([^"']*(?:/e/|rapidshare)[^"']*)["']""", RegexOption.IGNORE_CASE)
                 .find(html)?.groupValues?.getOrNull(1)?.let { UrlUtils.fixUrl(it, "${parsedUrl.scheme}://${parsedUrl.host}") }
             if (!realUrl.isNullOrBlank()) return realUrl
@@ -112,14 +113,14 @@ class RapidShareExtractor(private val client: OkHttpClient, private val headers:
             .set("X-Requested-With", "XMLHttpRequest")
             .set("Referer", url)
             .build()
-        val encryptedResult = runCatching { client.newCall(GET("$baseUrl/media/$token", mediaHeaders)).awaitSuccess().parseAs<EncryptedRapidResponse>().result }.getOrNull()
+        val encryptedResult = runCatching { client.awaitSuccess(GET("$baseUrl/media/$token", mediaHeaders)).parseAs<EncryptedRapidResponse>().result }.getOrNull()
             ?: return emptyList()
         val body = buildJsonObject {
             put("text", encryptedResult)
             put("agent", userAgent)
         }.toJsonRequestBody()
         val rapidResult = runCatching {
-            client.newCall(POST("https://enc-dec.app/api/dec-rapid", body = body, headers = encDecHeaders(url))).awaitSuccess().parseAs<RapidDecryptResponse>().result
+            client.awaitSuccess(POST("https://enc-dec.app/api/dec-rapid", body = body, headers = encDecHeaders(url))).parseAs<RapidDecryptResponse>().result
         }.getOrNull() ?: return emptyList()
         val subtitles = runCatching {
             if (subtitleUrl != null) {
@@ -127,7 +128,7 @@ class RapidShareExtractor(private val client: OkHttpClient, private val headers:
             } else {
                 rapidResult.tracks
                     .filter { it.kind == "captions" && it.file.isNotBlank() && it.label != null }
-                    .map { SubtitleTrack(it.file, it.label!!) }
+                    .map { SubtitleTrack(id = it.file, request = MediaRequest(uri = it.file), language = it.label!!) }
             }
         }.getOrDefault(emptyList())
 
@@ -145,12 +146,12 @@ class RapidShareExtractor(private val client: OkHttpClient, private val headers:
 
     private suspend fun getSubtitles(url: String, baseUrl: String): List<SubtitleTrack> {
         val subHeaders = headers.newBuilder().set("Accept", "*/*").set("Origin", baseUrl).set("Referer", "$baseUrl/").build()
-        return client.newCall(GET(url, subHeaders)).awaitSuccess().parseAs<List<RapidShareTrack>>()
+        return client.awaitSuccess(GET(url, subHeaders)).parseAs<List<RapidShareTrack>>()
             .filter { it.kind == "captions" && it.file.isNotBlank() && it.label != null }
-            .map { SubtitleTrack(it.file, it.label!!) }
+            .map { SubtitleTrack(id = it.file, request = MediaRequest(uri = it.file), language = it.label!!) }
     }
 
-    private fun subLangSelect(tracks: List<SubtitleTrack>, language: String): List<SubtitleTrack> = tracks.sortedByDescending { it.lang.contains(language, true) }
+    private fun subLangSelect(tracks: List<SubtitleTrack>, language: String): List<SubtitleTrack> = tracks.sortedByDescending { it.language?.contains(language, true) == true }
 
     companion object {
         private const val DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36"

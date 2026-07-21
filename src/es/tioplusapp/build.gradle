@@ -4,7 +4,7 @@ plugins {
 
 ext {
     extName = 'TioPlusApp'
-    extClass = '.TioPlusApp'
+    extClass = '.TioPlusAppFactory'
     themePkg = 'pelisplus'
     overrideVersionCode = 84
 }

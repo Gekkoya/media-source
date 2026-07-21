@@ -27,8 +27,8 @@ abstract class GenerateKeepRulesTask : DefaultTask() {
         outputFile.parentFile.mkdirs()
         outputFile.writeText(
             """
-            -keep class $packageName.$className { public <init>(); }
-            -keep class org.symera.source.** { *; }
+            -keep class $packageName.$className { public <init>(); public static ** INSTANCE; }
+            -keep class * implements org.symera.source.SymeraExtensionFactory { public <init>(); public static ** INSTANCE; }
             -keep class kotlinx.serialization.** { *; }
             -keepattributes *Annotation*, InnerClasses, EnclosingMethod, Signature
             """.trimIndent(),

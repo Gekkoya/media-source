@@ -11,10 +11,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okio.ByteString
 import org.jsoup.nodes.Document
+import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import org.symera.source.online.POST
 import org.symera.source.online.asJsoup
-import org.symera.source.online.awaitSuccess
 import java.util.concurrent.TimeUnit.MINUTES
 
 private val DEFAULT_CACHE_CONTROL = CacheControl.Builder().maxAge(10, MINUTES).build()

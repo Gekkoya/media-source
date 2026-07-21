@@ -3,6 +3,8 @@ package org.symera.mediasource.lib.streamlare
 import okhttp3.OkHttpClient
 import org.symera.mediasource.core.bodyString
 import org.symera.mediasource.core.toJsonRequestBody
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.POST
@@ -27,7 +29,7 @@ class StreamlareExtractor(private val client: OkHttpClient) {
                 val videoUrl = it.substringAfter("\n").substringBefore("\n").takeIf(String::isNotBlank)?.let { urlPart ->
                     if (urlPart.startsWith("http")) urlPart else masterPlaylistUrl.substringBefore("master.m3u8") + urlPart
                 } ?: return@mapNotNull null
-                SStream(url = videoUrl, title = buildQuality(quality, prefix, suffix), initialized = true)
+                PlayableStream(id = videoUrl, title = buildQuality(quality, prefix, suffix), request = MediaRequest(uri = videoUrl))
             }
         } else {
             val separator = "\"label\":\""
@@ -36,7 +38,7 @@ class StreamlareExtractor(private val client: OkHttpClient) {
                 val apiUrl = it.substringAfter("\"file\":\"").substringBefore("\",").replace("\\", "")
                     .takeIf(String::isNotBlank) ?: return@mapNotNull null
                 val videoUrl = client.newCall(POST(apiUrl, body = "".toJsonRequestBody())).execute().request.url.toString()
-                SStream(url = videoUrl, title = buildQuality(quality, prefix, suffix), initialized = true)
+                PlayableStream(id = videoUrl, title = buildQuality(quality, prefix, suffix), request = MediaRequest(uri = videoUrl))
             }
         }
     }

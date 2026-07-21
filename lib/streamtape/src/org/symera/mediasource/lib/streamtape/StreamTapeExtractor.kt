@@ -1,6 +1,8 @@
 package org.symera.mediasource.lib.streamtape
 
 import okhttp3.OkHttpClient
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
 import org.symera.source.online.GET
@@ -24,7 +26,7 @@ class StreamTapeExtractor(private val client: OkHttpClient) {
             ?: return null
         val videoUrl = "https:" + script.substringBefore("'") + script.substringAfter("+ ('xcd").substringBefore("'")
 
-        return SStream(url = videoUrl, title = quality, subtitleTracks = subtitleList, initialized = true)
+        return PlayableStream(id = videoUrl, title = quality, request = MediaRequest(uri = videoUrl), subtitleTracks = subtitleList)
     }
 
     fun streamsFromUrl(url: String, quality: String = "Streamtape", subtitleList: List<SubtitleTrack> = emptyList()): List<SStream> = streamFromUrl(url, quality, subtitleList)?.let(::listOf).orEmpty()

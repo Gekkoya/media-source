@@ -6,6 +6,9 @@ import okhttp3.Headers
 import okhttp3.OkHttpClient
 import org.symera.mediasource.core.bodyString
 import org.symera.mediasource.core.parseAs
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.POST
@@ -21,7 +24,13 @@ class BurstCloudExtractor(private val client: OkHttpClient) {
             val jsonHeaders = headers.newBuilder().set("referer", document.location()).build()
             val jsonObj = client.newCall(POST("$BURSTCLOUD_URL/file/play-request/", jsonHeaders, formBody)).execute().bodyString().parseAs<BurstCloudDto>()
             val videoUrl = jsonObj.purchase.cdnUrl.takeIf(String::isNotEmpty) ?: return@runCatching emptyList()
-            listOf(SStream(url = videoUrl, title = prefix + name, headers = newHeaders, initialized = true))
+            listOf(
+                PlayableStream(
+                    id = videoUrl,
+                    title = prefix + name,
+                    request = MediaRequest(uri = videoUrl, headers = newHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
+                ),
+            )
         }.getOrDefault(emptyList())
     }
 

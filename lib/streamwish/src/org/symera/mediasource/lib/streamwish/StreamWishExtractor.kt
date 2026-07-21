@@ -14,10 +14,11 @@ import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
 import org.symera.mediasource.lib.synchrony.Deobfuscator
 import org.symera.mediasource.lib.unpacker.JsUnpacker
+import org.symera.source.model.MediaRequest
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
+import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
-import org.symera.source.online.awaitSuccess
 
 class StreamWishExtractor(private val client: OkHttpClient, private val headers: Headers) {
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
@@ -40,21 +41,21 @@ class StreamWishExtractor(private val client: OkHttpClient, private val headers:
         for (domain in domainsToTry) {
             val fullUrl = UrlUtils.fixUrl(id, "https://$domain") ?: continue
             try {
-                val response = client.newCall(GET(fullUrl, headers)).awaitSuccess()
+                val response = client.awaitSuccess(GET(fullUrl, headers))
                 val body = response.bodyString()
                 if (body.isBlank()) continue
                 var doc = Jsoup.parse(body)
 
                 val scriptElement = doc.selectFirst("body > script[src*=/main.js]")
                 if (scriptElement != null) {
-                    val scriptContent = client.newCall(GET(scriptElement.absUrl("src"), headers)).awaitSuccess().bodyString()
+                    val scriptContent = client.awaitSuccess(GET(scriptElement.absUrl("src"), headers)).bodyString()
                     val deobfuscatedScript = Deobfuscator.deobfuscateScript(scriptContent) ?: continue
                     val dmcaServers = extractServerList(dmcaServersRegex, deobfuscatedScript)
                     val mainServers = extractServerList(mainServersRegex, deobfuscatedScript)
                     val rulesServers = extractServerList(rulesServersRegex, deobfuscatedScript)
                     val destination = (if (embedUrl.host in rulesServers) mainServers.randomOrNull() else dmcaServers.randomOrNull()) ?: continue
                     val redirectedUrl = embedUrl.newBuilder().host(destination).build().toString()
-                    doc = client.newCall(GET(getEmbedUrl(redirectedUrl), headers)).awaitSuccess().useAsJsoup()
+                    doc = client.awaitSuccess(GET(getEmbedUrl(redirectedUrl), headers)).useAsJsoup()
                 }
 
                 val scriptBody = doc.selectFirst("script:containsData(m3u8)")?.data()?.let { script ->
@@ -93,7 +94,7 @@ class StreamWishExtractor(private val client: OkHttpClient, private val headers:
         val fixedSubtitleStr = FIX_TRACKS_REGEX.replace(subtitleStr) { "\"${it.value}\"" }
         json.decodeFromString<List<TrackDto>>("[$fixedSubtitleStr]")
             .filter { it.kind.equals("captions", true) }
-            .map { SubtitleTrack(it.file, it.label ?: "") }
+            .map { SubtitleTrack(id = it.file, request = MediaRequest(uri = it.file), language = it.label ?: "") }
     } catch (_: SerializationException) {
         emptyList()
     }

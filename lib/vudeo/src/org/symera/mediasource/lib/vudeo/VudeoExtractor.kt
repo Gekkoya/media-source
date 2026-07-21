@@ -3,6 +3,9 @@ package org.symera.mediasource.lib.vudeo
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.asJsoup
@@ -18,7 +21,13 @@ class VudeoExtractor(private val client: OkHttpClient) {
             .replace("\"", "")
             .split(',')
             .filter { it.startsWith("https") }
-            .map { videoUrl -> SStream(url = videoUrl, title = "${prefix}Vudeo", headers = headers, initialized = true) }
+            .map { videoUrl ->
+                PlayableStream(
+                    id = videoUrl,
+                    title = "${prefix}Vudeo",
+                    request = MediaRequest(uri = videoUrl, headers = headers.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
+                )
+            }
     }
 
     fun videosFromUrl(url: String, prefix: String = ""): List<SStream> = streamsFromUrl(url, prefix)

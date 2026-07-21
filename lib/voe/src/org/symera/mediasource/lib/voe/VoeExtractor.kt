@@ -9,6 +9,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.asJsoup
@@ -42,7 +44,7 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
             playlistUtils.extractFromHls(m3u8, videoNameGen = { quality -> "${prefix}Voe:$quality" }).let(streamList::addAll)
         }
         if (mp4 != null) {
-            streamList.add(SStream(url = mp4, title = "${prefix}Voe:MP4", initialized = true))
+            streamList.add(PlayableStream(id = mp4, title = "${prefix}Voe:MP4", request = MediaRequest(uri = mp4)))
         }
 
         return streamList

@@ -11,10 +11,11 @@ import org.symera.mediasource.core.parallelCatchingFlatMap
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
 import org.symera.mediasource.lib.unpacker.autoUnpacker
+import org.symera.source.model.MediaRequest
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
+import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
-import org.symera.source.online.awaitSuccess
 
 class VidHideExtractor(private val client: OkHttpClient, private val headers: Headers) {
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
@@ -38,7 +39,7 @@ class VidHideExtractor(private val client: OkHttpClient, private val headers: He
         }
     }
 
-    private suspend fun fetchAndExtractScript(url: String): String? = client.newCall(GET(url, headers)).awaitSuccess()
+    private suspend fun fetchAndExtractScript(url: String): String? = client.awaitSuccess(GET(url, headers))
         .useAsJsoup()
         .select("script")
         .find { it.html().contains("eval(function(p,a,c,k,e,d)") }
@@ -53,7 +54,7 @@ class VidHideExtractor(private val client: OkHttpClient, private val headers: He
         json.decodeFromString<List<TrackDto>>("[$subtitleStr]")
             .filter { it.kind.equals("captions", true) }
             .mapNotNull {
-                UrlUtils.fixUrl(it.file, baseUrl)?.let { url -> SubtitleTrack(url, it.label ?: "") }
+                UrlUtils.fixUrl(it.file, baseUrl)?.let { url -> SubtitleTrack(id = url, request = MediaRequest(uri = url), language = it.label ?: "") }
             }
     } catch (_: SerializationException) {
         emptyList()

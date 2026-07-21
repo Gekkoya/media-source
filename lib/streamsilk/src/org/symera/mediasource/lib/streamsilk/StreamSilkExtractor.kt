@@ -7,6 +7,7 @@ import org.symera.mediasource.core.bodyString
 import org.symera.mediasource.core.commonEmptyHeaders
 import org.symera.mediasource.core.parseAs
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
+import org.symera.source.model.MediaRequest
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
 import org.symera.source.online.GET
@@ -34,7 +35,7 @@ class StreamSilkExtractor(private val client: OkHttpClient, private val headers:
                 runCatching {
                     client.newCall(GET(subUrl, videoHeaders)).execute().bodyString()
                         .parseAs<List<SubtitleDto>>()
-                        .forEach { add(SubtitleTrack(it.file, it.label)) }
+                        .forEach { add(SubtitleTrack(id = it.file, request = MediaRequest(uri = it.file), language = it.label)) }
                 }
             }
         }

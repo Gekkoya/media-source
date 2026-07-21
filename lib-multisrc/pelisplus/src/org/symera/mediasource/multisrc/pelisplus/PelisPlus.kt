@@ -1,7 +1,6 @@
 package org.symera.mediasource.multisrc.pelisplus
 
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.burstcloud.BurstCloudExtractor
 import org.symera.mediasource.lib.dood.DoodExtractor
@@ -21,16 +20,19 @@ import org.symera.mediasource.lib.vidhide.VidHideExtractor
 import org.symera.mediasource.lib.voe.VoeExtractor
 import org.symera.mediasource.lib.yourupload.YourUploadExtractor
 import org.symera.source.ConfigurableSymeraSource
+import org.symera.source.SourceEnvironment
 import org.symera.source.model.ContentType
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.model.SourcePreference
+import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import org.symera.source.online.SymeraHttpSource
-import org.symera.source.online.awaitSuccess
-import org.symera.source.preferenceValues
 
-abstract class PelisPlus :
-    SymeraHttpSource(),
+abstract class PelisPlus(
+    environment: SourceEnvironment,
+) : SymeraHttpSource(environment),
     ConfigurableSymeraSource {
 
     override val lang = "es"
@@ -41,8 +43,6 @@ abstract class PelisPlus :
         ignoreUnknownKeys = true
         explicitNulls = false
     }
-
-    protected val baseClient: OkHttpClient by lazy { defaultClientProvider() }
 
     private val voeExtractor by lazy { VoeExtractor(client, headers) }
     private val okruExtractor by lazy { OkruExtractor(client) }
@@ -93,21 +93,19 @@ abstract class PelisPlus :
     protected suspend fun serverVideoResolver(url: String, prefix: String = "", serverName: String? = ""): List<SStream> = serverStreamResolver(url, prefix, serverName)
 
     private suspend fun amazonStreamsFromUrl(url: String, prefix: String): List<SStream> {
-        val body = client.newCall(GET(url)).awaitSuccess().useAsJsoup()
+        val body = client.awaitSuccess(GET(url)).useAsJsoup()
         val shareId = body.selectFirst("script:containsData(var shareId)")?.data()
             ?.substringAfter("shareId = \"")
             ?.substringBefore("\"")
             ?.takeIf { it.isNotBlank() }
             ?: return emptyList()
-        val amazonApiJson = client.newCall(GET("https://www.amazon.com/drive/v1/shares/$shareId?resourceVersion=V2&ContentType=JSON&asset=ALL"))
-            .awaitSuccess()
+        val amazonApiJson = client.awaitSuccess(GET("https://www.amazon.com/drive/v1/shares/$shareId?resourceVersion=V2&ContentType=JSON&asset=ALL"))
             .useAsJsoup()
         val epId = amazonApiJson.toString().substringAfter("\"id\":\"").substringBefore("\"")
-        val amazonApi = client.newCall(GET("https://www.amazon.com/drive/v1/nodes/$epId/children?resourceVersion=V2&ContentType=JSON&limit=200&sort=%5B%22kind+DESC%22%2C+%22modifiedDate+DESC%22%5D&asset=ALL&tempLink=true&shareId=$shareId"))
-            .awaitSuccess()
+        val amazonApi = client.awaitSuccess(GET("https://www.amazon.com/drive/v1/nodes/$epId/children?resourceVersion=V2&ContentType=JSON&limit=200&sort=%5B%22kind+DESC%22%2C+%22modifiedDate+DESC%22%5D&asset=ALL&tempLink=true&shareId=$shareId"))
             .useAsJsoup()
         val videoUrl = amazonApi.toString().substringAfter("\"FOLDER\":").substringAfter("tempLink\":\"").substringBefore("\"")
-        return listOf(SStream(url = videoUrl, title = "$prefix Amazon", initialized = true))
+        return listOf(PlayableStream(id = videoUrl, title = "$prefix Amazon", request = MediaRequest(uri = videoUrl)))
     }
 
     protected fun fetchUrls(text: String?): List<String> {
@@ -125,14 +123,14 @@ abstract class PelisPlus :
     private fun Array<String>.any(url: String): Boolean = any { url.contains(it, ignoreCase = true) }
 
     override fun List<SStream>.sortStreams(): List<SStream> {
-        val preferences = preferenceValues()
+        val preferences = environment.preferencesFor(sourcePreferenceNamespace)
         val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)
         val server = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)
         return sortedWith(
             compareBy(
-                { it.title.contains(server, true) },
-                { it.title.contains(quality) },
-                { Regex("""(\d+)p""").find(it.title)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
+                { it.title.orEmpty().contains(server, true) },
+                { it.title.orEmpty().contains(quality) },
+                { Regex("""(\d+)p""").find(it.title.orEmpty())?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
             ),
         ).reversed()
     }

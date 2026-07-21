@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import org.symera.mediasource.core.bodyString
 import org.symera.mediasource.core.parseAs
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
+import org.symera.source.model.MediaRequest
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
 import org.symera.source.online.GET
@@ -25,7 +26,7 @@ class DopeFlixExtractor(
         if (videos.isEmpty()) return emptyList()
         val subtitles = videos.first().tracks
             ?.filter { it.kind == "captions" }
-            ?.map { SubtitleTrack(it.file, it.label) }
+            ?.map { SubtitleTrack(id = it.file, request = MediaRequest(uri = it.file), language = it.label) }
             .orEmpty()
             .let(playlistUtils::fixSubtitles)
 

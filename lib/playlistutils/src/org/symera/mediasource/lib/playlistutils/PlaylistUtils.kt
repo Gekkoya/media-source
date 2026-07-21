@@ -10,10 +10,14 @@ import org.symera.mediasource.core.commonEmptyHeaders
 import org.symera.mediasource.core.parallelMapNotNullBlocking
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.source.model.AudioTrack
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
+import org.symera.source.model.StreamHints
 import org.symera.source.model.SubtitleTrack
+import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
-import org.symera.source.online.awaitSuccess
 import java.io.File
 import kotlin.math.abs
 
@@ -55,28 +59,29 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
 
         if (PLAYLIST_SEPARATOR !in masterPlaylist) {
             return listOf(
-                SStream(
-                    url = playlistUrl,
+                PlayableStream(
+                    id = playlistUrl,
                     title = videoNameGen("Video"),
-                    headers = masterHeaders,
+                    request = MediaRequest(uri = playlistUrl, headers = masterHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
                     subtitleTracks = subtitleList,
                     audioTracks = audioList,
-                    initialized = true,
                 ),
             )
         }
 
         val subtitleTracks = subtitleList + SUBTITLE_REGEX.findAll(masterPlaylist).mapNotNull {
             SubtitleTrack(
-                UrlUtils.fixUrl(it.groupValues[2], playlistUrl) ?: return@mapNotNull null,
-                it.groupValues[1],
+                id = it.groupValues[2],
+                request = MediaRequest(uri = UrlUtils.fixUrl(it.groupValues[2], playlistUrl) ?: return@mapNotNull null),
+                language = it.groupValues[1],
             )
         }.toList()
 
         val audioTracks = audioList + AUDIO_REGEX.findAll(masterPlaylist).mapNotNull {
             AudioTrack(
-                UrlUtils.fixUrl(it.groupValues[2], playlistUrl) ?: return@mapNotNull null,
-                it.groupValues[1],
+                id = it.groupValues[2],
+                request = MediaRequest(uri = UrlUtils.fixUrl(it.groupValues[2], playlistUrl) ?: return@mapNotNull null),
+                label = it.groupValues[1],
             )
         }.toList()
 
@@ -102,15 +107,19 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
                 UrlUtils.fixUrl(url, playlistUrl)?.trimEnd()
             } ?: return@mapNotNull null
 
-            bandwidth to SStream(
-                url = videoUrl,
+            bandwidth to PlayableStream(
+                id = videoUrl,
                 title = videoNameGen(streamName),
-                resolution = QUALITY_REGEX.find(resolution.orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull(),
-                bitrate = bandwidth?.toInt(),
-                headers = videoHeadersGen(headers, referer, videoUrl),
+                request = MediaRequest(
+                    uri = videoUrl,
+                    headers = videoHeadersGen(headers, referer, videoUrl).toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } },
+                ),
+                hints = StreamHints(
+                    height = QUALITY_REGEX.find(resolution.orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull(),
+                    bitrateBitsPerSecond = bandwidth,
+                ),
                 subtitleTracks = subtitleTracks,
                 audioTracks = audioTracks,
-                initialized = true,
             )
         }
             .sortedByDescending { (bandwidth, _) -> bandwidth ?: 0L }
@@ -184,22 +193,26 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
 
         val audioTracks = audioList + doc.select("Representation[mimetype~=audio]").map { audioSrc ->
             val bandwidth = audioSrc.attr("bandwidth").toLongOrNull()
-            AudioTrack(audioSrc.text(), formatBytes(bandwidth))
+            AudioTrack(id = audioSrc.text(), request = MediaRequest(uri = audioSrc.text()), label = formatBytes(bandwidth))
         }
 
         return doc.select("Representation[mimetype~=video]").map { videoSrc ->
             val bandwidth = videoSrc.attr("bandwidth")
             val res = videoSrc.attr("height").let(toStandardQuality).let { "$it (${videoSrc.attr("width")}x${videoSrc.attr("height")})" }
             val videoUrl = videoSrc.text()
-            SStream(
-                url = videoUrl,
+            PlayableStream(
+                id = videoUrl,
                 title = videoNameGen(res, bandwidth),
-                resolution = videoSrc.attr("height").toIntOrNull(),
-                bitrate = bandwidth.toIntOrNull(),
+                request = MediaRequest(
+                    uri = videoUrl,
+                    headers = videoHeadersGen(headers, referer, videoUrl).toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } },
+                ),
+                hints = StreamHints(
+                    height = videoSrc.attr("height").toIntOrNull(),
+                    bitrateBitsPerSecond = bandwidth.toLongOrNull(),
+                ),
                 audioTracks = audioTracks,
                 subtitleTracks = subtitleList,
-                headers = videoHeadersGen(headers, referer, videoUrl),
-                initialized = true,
             )
         }
     }
@@ -233,11 +246,11 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
 
     fun fixSubtitles(subtitleList: List<SubtitleTrack>): List<SubtitleTrack> = subtitleList.parallelMapNotNullBlocking {
         runCatching {
-            val subData = client.newCall(GET(it.url)).awaitSuccess().bodyString()
+            val subData = client.awaitSuccess(GET(it.request.uri)).bodyString()
             val file = File.createTempFile("subs", "vtt").also(File::deleteOnExit)
             file.writeText(FIX_SUBTITLE_REGEX.replace(subData, ::cleanSubtitleData))
             val uri = Uri.fromFile(file)
-            SubtitleTrack(uri.toString(), it.lang, it.label)
+            SubtitleTrack(id = uri.toString(), request = MediaRequest(uri = uri.toString()), language = it.language, label = it.label)
         }.getOrNull()
     }
 

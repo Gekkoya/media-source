@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-feature android:name="symera.extension" android:required="false" />
 
     <application
         android:allowBackup="false"
@@ -9,15 +10,23 @@
         android:icon="@mipmap/ic_launcher"
         android:label="${appName}"
         android:supportsRtl="true">
-        <meta-data
-            android:name="symera.extension.class"
-            android:value="${extClass}" />
-        <meta-data
-            android:name="symera.extension.sdk"
-            android:value="${sourceSdk}" />
-        <meta-data
-            android:name="symera.extension.nsfw"
-            android:value="${nsfw}" />
+        <service
+            android:name="org.symera.mediasource.SymeraExtensionMarkerService"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="symera.extension" />
+            </intent-filter>
+            <meta-data
+                android:name="symera.extension.factory"
+                android:value="${extClass}" />
+            <meta-data
+                android:name="symera.extension.sdk"
+                android:value="${sourceSdk}" />
+            <meta-data
+                android:name="symera.extension.nsfw"
+                android:value="${nsfw}" />
+        </service>
     </application>
 
 </manifest>

@@ -7,6 +7,9 @@ import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.symera.mediasource.core.parseAs
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.POST
@@ -27,7 +30,7 @@ class JkanimeExtractor(private val client: OkHttpClient) {
         val nozomiResponse = client.newCall(POST("https://jkanime.net/gsplay/api.php", body = nozomiBody)).execute()
         val nozomiUrl = nozomiResponse.body.string().parseAs<NozomiResponse>().file ?: return emptyList()
 
-        return listOf(SStream(url = nozomiUrl, title = "${prefix}Nozomi", initialized = true))
+        return listOf(PlayableStream(id = nozomiUrl, title = "${prefix}Nozomi", request = MediaRequest(nozomiUrl)))
     }
 
     fun parseStreamFromDpPlayer(response: Response, quality: String = ""): List<SStream> {
@@ -37,7 +40,7 @@ class JkanimeExtractor(private val client: OkHttpClient) {
             ?.data()?.substringAfter("url: '")
             ?.substringBefore("'") ?: return emptyList()
 
-        return listOf(SStream(url = streamUrl, title = quality, initialized = true))
+        return listOf(PlayableStream(id = streamUrl, title = quality.ifBlank { "Jkanime" }, request = MediaRequest(streamUrl)))
     }
 
     fun getDesuFromUrl(url: String, prefix: String = ""): List<SStream> {
@@ -51,7 +54,7 @@ class JkanimeExtractor(private val client: OkHttpClient) {
 
         if (contentType.startsWith("video/")) {
             val realUrl = response.request.url.toString()
-            return listOf(SStream(url = realUrl, title = "${prefix}Desuka", initialized = true))
+            return listOf(PlayableStream(id = realUrl, title = "${prefix}Desuka", request = MediaRequest(realUrl)))
         }
         return parseStreamFromDpPlayer(response, "${prefix}Desuka")
     }
@@ -60,11 +63,10 @@ class JkanimeExtractor(private val client: OkHttpClient) {
         val document = client.newCall(GET(url)).execute().asJsoup()
         val videoUrl = document.selectFirst("""source[src*=".m3u8"]""")?.attr("abs:src") ?: return emptyList()
         return listOf(
-            SStream(
-                url = videoUrl,
+            PlayableStream(
+                id = videoUrl,
                 title = "${prefix}Magi",
-                headers = Headers.Builder().add("Referer", url).build(),
-                initialized = true,
+                request = MediaRequest(videoUrl, headers = listOf(HttpHeader("Referer", url))),
             ),
         )
     }
@@ -73,7 +75,7 @@ class JkanimeExtractor(private val client: OkHttpClient) {
         val response = client.newCall(GET(url)).execute()
         val downloadUrl = response.asJsoup().selectFirst("a#downloadButton")?.attr("href")
         if (!downloadUrl.isNullOrBlank()) {
-            return listOf(SStream(url = downloadUrl, title = "${prefix}MediaFire", initialized = true))
+            return listOf(PlayableStream(id = downloadUrl, title = "${prefix}MediaFire", request = MediaRequest(downloadUrl)))
         }
         return emptyList()
     }

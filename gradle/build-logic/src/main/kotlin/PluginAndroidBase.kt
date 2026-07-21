@@ -5,7 +5,6 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.kotlin.dsl.configure
 import symera.gradle.configurations.configureKotlin
-import symera.gradle.extensions.formatTaskName
 import symera.gradle.extensions.symera
 
 @Suppress("unused")
@@ -42,10 +41,6 @@ class PluginAndroidBase : Plugin<Project> {
                     targetCompatibility = javaVersion
                 }
             }
-        }
-
-        tasks.matching { it.name == "preBuild" }.configureEach {
-            dependsOn(formatTaskName())
         }
     }
 }

@@ -8,7 +8,7 @@ ktlint = "1.8.0"
 kotlinx-serialization = "1.11.0"
 okhttp = "5.4.0"
 spotless = "8.8.0"
-symera-extensions-lib = "8e2e290f10"
+symera-extensions-lib = "v4.0.1"
 
 [libraries]
 android-gradle = { module = "com.android.tools.build:gradle", version.ref = "agp" }

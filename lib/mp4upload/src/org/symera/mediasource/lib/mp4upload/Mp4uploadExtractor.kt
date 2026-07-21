@@ -3,7 +3,11 @@ package org.symera.mediasource.lib.mp4upload
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import org.symera.mediasource.lib.unpacker.JsUnpacker
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
+import org.symera.source.model.StreamHints
 import org.symera.source.online.GET
 import org.symera.source.online.asJsoup
 
@@ -23,12 +27,11 @@ class Mp4uploadExtractor(private val client: OkHttpClient) {
         val quality = "${prefix}Mp4Upload - $resolution$suffix"
 
         return listOf(
-            SStream(
-                url = videoUrl,
+            PlayableStream(
+                id = videoUrl,
                 title = quality,
-                resolution = QUALITY_REGEX.find(script)?.groupValues?.getOrNull(1)?.toIntOrNull(),
-                headers = newHeaders,
-                initialized = true,
+                request = MediaRequest(uri = videoUrl, headers = newHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
+                hints = StreamHints(height = QUALITY_REGEX.find(script)?.groupValues?.getOrNull(1)?.toIntOrNull()),
             ),
         )
     }

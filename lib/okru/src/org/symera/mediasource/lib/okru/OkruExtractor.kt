@@ -5,6 +5,8 @@ import okhttp3.OkHttpClient
 import org.symera.mediasource.core.commonEmptyHeaders
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
 
@@ -40,7 +42,7 @@ class OkruExtractor(private val client: OkHttpClient, private val headers: Heade
             val quality = data.substringBefore("\\\"").let { if (fixQualities) fixQuality(it) else it }
             val streamTitle = "Okru:$quality".addPrefix(prefix)
             if (videoUrl.startsWith("https://")) {
-                SStream(url = videoUrl, title = streamTitle, initialized = true)
+                PlayableStream(id = videoUrl, title = streamTitle, request = MediaRequest(uri = videoUrl))
             } else {
                 null
             }

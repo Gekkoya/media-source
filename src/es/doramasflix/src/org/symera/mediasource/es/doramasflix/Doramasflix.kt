@@ -21,24 +21,33 @@ import org.symera.mediasource.lib.streamtape.StreamTapeExtractor
 import org.symera.mediasource.lib.streamwish.StreamWishExtractor
 import org.symera.mediasource.lib.universal.UniversalExtractor
 import org.symera.mediasource.lib.voe.VoeExtractor
+import org.symera.source.CatalogCapability
+import org.symera.source.CatalogFeed
+import org.symera.source.SourceCapability
+import org.symera.source.SourceEnvironment
+import org.symera.source.SymeraExtensionFactory
 import org.symera.source.model.ContentPage
-import org.symera.source.model.ContentStatus
+import org.symera.source.model.ContentRating
+import org.symera.source.model.ContentRelease
 import org.symera.source.model.ContentType
 import org.symera.source.model.FilterList
+import org.symera.source.model.PageRequest
+import org.symera.source.model.PlayableItemType
 import org.symera.source.model.SContent
 import org.symera.source.model.SHoster
 import org.symera.source.model.SPlayableItem
 import org.symera.source.model.SSeason
 import org.symera.source.model.SStream
+import org.symera.source.network.awaitSuccess
 import org.symera.source.online.asJsoup
-import org.symera.source.online.awaitSuccess
-import org.symera.source.preferenceValues
 
-class Doramasflix : Source() {
+class Doramasflix(environment: SourceEnvironment) : Source(environment) {
     override val name = "Doramasflix"
     override val baseUrl = "https://doramasflix.io"
     override val lang = "es"
     override val contentTypes = setOf(ContentType.SERIES, ContentType.MOVIE)
+    override val catalogCapabilities = setOf(CatalogCapability.MOVIES, CatalogCapability.SERIES, CatalogCapability.SEARCH)
+    override val sourceCapabilities = setOf(SourceCapability.PLAYABLE_ITEMS, SourceCapability.SEASONS, SourceCapability.HOSTERS)
 
     private val graphqlUrl = "https://sv1.fluxcedene.net/api/gql"
 
@@ -254,10 +263,10 @@ class Doramasflix : Source() {
 
     // region Series
 
-    override fun seriesRequest(page: Int): Request = gqlRequest(
+    override fun seriesRequest(request: PageRequest, filters: FilterList): Request = gqlRequest(
         paginationDoramaQuery,
         buildJsonObject {
-            put("page", JsonPrimitive(page))
+            put("page", JsonPrimitive(request.page))
             put("perPage", JsonPrimitive(20))
         },
     )
@@ -276,10 +285,10 @@ class Doramasflix : Source() {
 
     // region Movies
 
-    override fun moviesRequest(page: Int): Request = gqlRequest(
+    override fun moviesRequest(request: PageRequest, filters: FilterList): Request = gqlRequest(
         paginationMovieQuery,
         buildJsonObject {
-            put("page", JsonPrimitive(page))
+            put("page", JsonPrimitive(request.page))
             put("perPage", JsonPrimitive(20))
         },
     )
@@ -298,14 +307,14 @@ class Doramasflix : Source() {
 
     // region Search
 
-    override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
+    override fun searchRequest(request: PageRequest, query: String, filters: FilterList): Request {
         if (query.isNotBlank()) {
             return gqlRequest(
                 searchDoramaQuery,
                 buildJsonObject { put("input", JsonPrimitive(query)) },
             )
         }
-        return seriesRequest(page)
+        return seriesRequest(request, filters)
     }
 
     override fun searchParse(response: Response): ContentPage {
@@ -336,16 +345,13 @@ class Doramasflix : Source() {
 
     override fun contentDetailsParse(response: Response): SContent {
         val doc = response.asJsoup()
-        val nextDataEl = doc.selectFirst("script#__NEXT_DATA__") ?: return SContent.create().apply {
-            url = response.request.url.encodedPath
-            title = ""
-        }
+        val nextDataEl = doc.selectFirst("script#__NEXT_DATA__") ?: return SContent(
+            url = relativeUrl(response.request.url.toString()),
+            title = "Unknown",
+        )
         val nextData = strictJson.parseToJsonElement(nextDataEl.data()).jsonObject
         val apolloState = nextData["props"]?.jsonObject?.get("pageProps")?.jsonObject?.get("apolloState")?.jsonObject
-            ?: return SContent.create().apply {
-                url = response.request.url.encodedPath
-                title = ""
-            }
+            ?: return SContent(url = relativeUrl(response.request.url.toString()), title = "Unknown")
 
         val doramaEntry = apolloState.entries.firstOrNull {
             it.key.startsWith("Dorama:")
@@ -360,23 +366,24 @@ class Doramasflix : Source() {
         val mongoId = entry?.get("_id")?.jsonPrimitive?.contentOrNull
         val urlWithId = if (mongoId != null) "${response.request.url.encodedPath}?_id=$mongoId" else response.request.url.encodedPath
 
-        return SContent.create().apply {
-            url = urlWithId
+        return SContent(
+            url = urlWithId,
             title = entry?.get("name")?.jsonPrimitive?.contentOrNull
                 ?: entry?.get("title")?.jsonPrimitive?.contentOrNull
-                ?: ""
-            description = entry?.get("overview")?.jsonPrimitive?.contentOrNull
-            posterUrl = entry?.get("poster_path")?.jsonPrimitive?.contentOrNull?.let { "https://image.tmdb.org/t/p/w500$it" }
-            backdropUrl = entry?.get("backdrop_path")?.jsonPrimitive?.contentOrNull?.let { "https://image.tmdb.org/t/p/w1280$it" }
-            genres = entry?.get("genres")?.jsonArray?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }
-            status = ContentStatus.UNKNOWN
-            contentType = if (doramaEntry != null) ContentType.SERIES else ContentType.MOVIE
-            year = (
-                entry?.get("first_air_date")?.jsonPrimitive?.contentOrNull
-                    ?: entry?.get("release_date")?.jsonPrimitive?.contentOrNull
-                )
-                ?.take(4)?.toIntOrNull()
-        }
+                ?: "Unknown",
+            description = entry?.get("overview")?.jsonPrimitive?.contentOrNull,
+            posterUrl = entry?.get("poster_path")?.jsonPrimitive?.contentOrNull?.let { "https://image.tmdb.org/t/p/w500$it" },
+            backdropUrl = entry?.get("backdrop_path")?.jsonPrimitive?.contentOrNull?.let { "https://image.tmdb.org/t/p/w1280$it" },
+            genres = entry?.get("genres")?.jsonArray?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }.orEmpty(),
+            contentType = if (doramaEntry != null) ContentType.SERIES else ContentType.MOVIE,
+            release = ContentRelease(
+                year = (
+                    entry?.get("first_air_date")?.jsonPrimitive?.contentOrNull
+                        ?: entry?.get("release_date")?.jsonPrimitive?.contentOrNull
+                    )
+                    ?.take(4)?.toIntOrNull(),
+            ),
+        )
     }
 
     // endregion
@@ -400,17 +407,17 @@ class Doramasflix : Source() {
 
     override fun seasonsParse(response: Response): List<SSeason> {
         val seasons = parseGqlData(response)["listSeasons"]?.jsonArray ?: return emptyList()
-        return seasons.map { element ->
+        return seasons.mapNotNull { element ->
             val seasonObj = element.jsonObject
             val seasonNum = seasonObj["season_number"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-            SSeason.create().apply {
-                this.seasonNumber = seasonNum
-                title = "Temporada ${seasonNum?.toInt() ?: "?"}"
-                description = null
-                posterUrl = seasonObj["poster_path"]?.jsonPrimitive?.contentOrNull
-                    ?.let { "https://image.tmdb.org/t/p/w500$it" }
-                url = seasonObj["slug"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            }
+            val number = seasonNum?.toInt() ?: return@mapNotNull null
+            val url = seasonObj["slug"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            SSeason(
+                url = url,
+                number = number,
+                title = "Temporada $number",
+                posterUrl = seasonObj["poster_path"]?.jsonPrimitive?.contentOrNull?.let { "https://image.tmdb.org/t/p/w500$it" },
+            )
         }
     }
 
@@ -424,11 +431,7 @@ class Doramasflix : Source() {
             ?: return emptyList()
         if (content.contentType == ContentType.MOVIE) {
             return listOf(
-                SPlayableItem.create().apply {
-                    setUrlWithoutDomain("movie/$contentId")
-                    title = "Película"
-                    episodeNumber = 1.0
-                },
+                SPlayableItem(url = "movie/$contentId", title = "Película", type = PlayableItemType.MOVIE),
             )
         }
 
@@ -484,15 +487,17 @@ class Doramasflix : Source() {
 
     private fun parsePlayableItems(response: Response): List<SPlayableItem> {
         val data = parseGqlData(response)
-        return data["listEpisodes"]?.jsonArray?.map { element ->
+        return data["listEpisodes"]?.jsonArray?.mapNotNull { element ->
             val ep = strictJson.decodeFromString(EpisodeDto.serializer(), element.toString())
-            SPlayableItem.create().apply {
-                seasonNumber = ep.seasonNumber
-                episodeNumber = ep.episodeNumber
-                title = "T${ep.seasonNumber?.toInt() ?: "?"} - E${ep.episodeNumber?.toInt() ?: "?"}: ${ep.name}"
-                thumbnailUrl = ep.stillPath?.let { "https://image.tmdb.org/t/p/w300$it" }
-                setUrlWithoutDomain("episode/${ep.id}")
-            }
+            val episodeNumber = ep.episodeNumber ?: return@mapNotNull null
+            SPlayableItem(
+                url = "episode/${ep.id}",
+                title = "T${ep.seasonNumber?.toInt() ?: "?"} - E${episodeNumber.toInt()}: ${ep.name}",
+                type = PlayableItemType.EPISODE,
+                seasonNumber = ep.seasonNumber?.toInt(),
+                episodeNumber = org.symera.source.model.EpisodeNumber(episodeNumber.toString()),
+                thumbnailUrl = ep.stillPath?.let { "https://image.tmdb.org/t/p/w300$it" },
+            )
         } ?: emptyList()
     }
 
@@ -543,32 +548,29 @@ class Doramasflix : Source() {
             )
 
             SHoster(
-                hosterUrl = link,
-                hosterName = hosterName,
-                displayName = "$lang $hosterName".trim(),
-                internalData = link,
-                lazy = true,
+                id = link,
+                name = "$lang $hosterName".trim(),
+                requestUrl = link,
+                resolverData = link,
             )
         }
     }
 
-    override fun streamsParse(response: Response, hoster: SHoster): List<SStream> = emptyList()
-
     override suspend fun getStreams(hoster: SHoster): List<SStream> {
-        val url = decodeFkPlayerUrl(hoster.hosterUrl)
+        val url = decodeFkPlayerUrl(hoster.requestUrl ?: return emptyList())
         return when {
             "dood" in url || "d-s.io" in url || "dsvplay" in url || "do7go" in url ->
-                doodExtractor.streamsFromUrl(url, hoster.hosterName)
+                doodExtractor.streamsFromUrl(url, hoster.name)
             "voe" in url || "tubelessceliolymph" in url || "simpulumlamerop" in url ->
-                voeExtractor.streamsFromUrl(url, hoster.hosterName)
+                voeExtractor.streamsFromUrl(url, hoster.name)
             "streamtape" in url || "stp" in url || "stape" in url ->
-                streamTapeExtractor.streamsFromUrl(url, hoster.hosterName)
+                streamTapeExtractor.streamsFromUrl(url, hoster.name)
             "streamwish" in url || "sfastwish" in url || "wishembed" in url || "strwish" in url ->
-                streamWishExtractor.streamsFromUrl(url, hoster.hosterName)
+                streamWishExtractor.streamsFromUrl(url, hoster.name)
             "filemoon" in url || "moonplayer" in url || "files.im" in url ->
-                filemoonExtractor.streamsFromUrl(url, prefix = hoster.hosterName)
+                filemoonExtractor.streamsFromUrl(url, prefix = hoster.name)
             else ->
-                universalExtractor.streamsFromUrl(url, headers, prefix = hoster.hosterName)
+                universalExtractor.streamsFromUrl(url, headers, prefix = hoster.name)
         }.sortStreams()
     }
 
@@ -591,12 +593,12 @@ class Doramasflix : Source() {
     }
 
     override fun List<SStream>.sortStreams(): List<SStream> {
-        val prefs = preferenceValues()
+        val prefs = environment.preferencesFor(sourcePreferenceNamespace)
         val quality = prefs.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)
         return sortedWith(
             compareBy(
-                { it.title.contains(quality) },
-                { Regex("""(\d+)p""").find(it.title)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
+                { it.title.orEmpty().contains(quality) },
+                { Regex("""(\d+)p""").find(it.title.orEmpty())?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
             ),
         ).reversed()
     }
@@ -605,7 +607,7 @@ class Doramasflix : Source() {
 
     // region Filters & Preferences
 
-    override fun getFilterList() = FilterList()
+    override fun getFilterList(feed: CatalogFeed) = FilterList()
 
     override fun getSourcePreferences() = listOf(
         org.symera.source.model.SourcePreference.Select(
@@ -621,31 +623,29 @@ class Doramasflix : Source() {
 
     // region Helpers
 
-    private fun DoramaDto.toSContent(): SContent = SContent.create().apply {
-        setUrlWithoutDomain("/doramas/${this@toSContent.slug}?_id=${this@toSContent.id}")
-        title = this@toSContent.nameEs ?: this@toSContent.name
-        description = this@toSContent.overview
-        posterUrl = this@toSContent.posterPath?.let { "https://image.tmdb.org/t/p/w500$it" }
-        backdropUrl = this@toSContent.backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" }
-        genres = this@toSContent.genres?.mapNotNull { it.name }
-        status = ContentStatus.UNKNOWN
-        contentType = ContentType.SERIES
-        year = this@toSContent.firstAirDate?.take(4)?.toIntOrNull()
-        rating = this@toSContent.voteAverage
-    }
+    private fun DoramaDto.toSContent() = SContent(
+        url = "/doramas/$slug?_id=$id",
+        title = nameEs ?: name,
+        description = overview,
+        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+        backdropUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" },
+        genres = genres?.mapNotNull { it.name }.orEmpty(),
+        contentType = ContentType.SERIES,
+        release = ContentRelease(year = firstAirDate?.take(4)?.toIntOrNull()),
+        rating = voteAverage?.let { ContentRating(it, maximum = 10.0) },
+    )
 
-    private fun MovieDto.toSContent(): SContent = SContent.create().apply {
-        setUrlWithoutDomain("/peliculas/${this@toSContent.slug}?_id=${this@toSContent.id}")
-        title = this@toSContent.nameEs ?: this@toSContent.title ?: this@toSContent.name
-        description = this@toSContent.overview
-        posterUrl = this@toSContent.posterPath?.let { "https://image.tmdb.org/t/p/w500$it" }
-        backdropUrl = this@toSContent.backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" }
-        genres = this@toSContent.genres?.mapNotNull { it.name }
-        status = ContentStatus.UNKNOWN
-        contentType = ContentType.MOVIE
-        year = this@toSContent.releaseDate?.take(4)?.toIntOrNull()
-        rating = this@toSContent.voteAverage
-    }
+    private fun MovieDto.toSContent() = SContent(
+        url = "/peliculas/$slug?_id=$id",
+        title = nameEs ?: title ?: name,
+        description = overview,
+        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+        backdropUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" },
+        genres = genres?.mapNotNull { it.name }.orEmpty(),
+        contentType = ContentType.MOVIE,
+        release = ContentRelease(year = releaseDate?.take(4)?.toIntOrNull()),
+        rating = voteAverage?.let { ContentRating(it, maximum = 10.0) },
+    )
 
     private fun extractHosterName(url: String, serverName: String = ""): String = when {
         serverName.isNotEmpty() -> serverName
@@ -698,4 +698,8 @@ class Doramasflix : Source() {
         private const val PREF_QUALITY_DEFAULT = "1080"
         private val qualityList = listOf("1080", "720", "480", "360")
     }
+}
+
+object DoramasflixFactory : SymeraExtensionFactory {
+    override fun createVodSources(environment: SourceEnvironment) = listOf(Doramasflix(environment))
 }

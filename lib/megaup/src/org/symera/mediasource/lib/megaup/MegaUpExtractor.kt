@@ -23,11 +23,14 @@ import org.symera.mediasource.core.bodyString
 import org.symera.mediasource.core.parseAs
 import org.symera.mediasource.core.toJsonRequestBody
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
+import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import org.symera.source.online.POST
-import org.symera.source.online.awaitSuccess
 import kotlin.coroutines.resume
 
 class MegaUpExtractor(
@@ -60,7 +63,7 @@ class MegaUpExtractor(
                 set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 set("Referer", url)
             }.build()
-            val html = client.newCall(GET(url, iframeHeaders)).awaitSuccess().bodyString()
+            val html = client.awaitSuccess(GET(url, iframeHeaders)).bodyString()
             val iframeRegex = Regex("""<iframe[^>]+src=["']([^"']*(?:/e/|megaup)[^"']*)["']""", RegexOption.IGNORE_CASE)
             val realUrl = iframeRegex.find(html)?.groupValues?.getOrNull(1)?.let { UrlUtils.fixUrl(it, "${parsedUrl.scheme}://${parsedUrl.host}") }
             if (!realUrl.isNullOrBlank()) return realUrl
@@ -119,13 +122,13 @@ class MegaUpExtractor(
             set("X-Requested-With", "XMLHttpRequest")
             set("Referer", url)
         }.build()
-        val megaToken = client.newCall(GET("$megaHost/media/$token", mediaHeaders)).awaitSuccess().parseAs<InternalEncryptedResponse>().result
+        val megaToken = client.awaitSuccess(GET("$megaHost/media/$token", mediaHeaders)).parseAs<InternalEncryptedResponse>().result
         val tokenBody = buildJsonObject {
             put("text", megaToken)
             put("agent", userAgent)
         }.toJsonRequestBody()
-        val megaUpResult = client.newCall(POST("https://enc-dec.app/api/dec-mega", body = tokenBody, headers = encDecHeaders(url)))
-            .awaitSuccess().parseAs<InternalTokenResponse>().result
+        val megaUpResult = client.awaitSuccess(POST("https://enc-dec.app/api/dec-mega", body = tokenBody, headers = encDecHeaders(url)))
+            .parseAs<InternalTokenResponse>().result
         val subtitleTracks = megaUpResult.subtitleTracks()
         val videoHeaders = headers.newBuilder().set("User-Agent", userAgent).set("Origin", megaHost).set("Referer", "$megaHost/").build()
 
@@ -134,7 +137,14 @@ class MegaUpExtractor(
             when {
                 m3u8Regex.containsMatchIn(videoUrl) -> playlistUtils.extractFromHls(videoUrl, referer = "$megaHost/", subtitleList = subtitleTracks, videoNameGen = { q -> "$prefix: $q" })
                 mpdRegex.containsMatchIn(videoUrl) -> playlistUtils.extractFromDash(videoUrl, videoNameGen = { q -> "$prefix: $q" }, subtitleList = subtitleTracks, referer = "$megaHost/")
-                mp4Regex.containsMatchIn(videoUrl) -> listOf(SStream(url = videoUrl, title = "$prefix: MP4", headers = videoHeaders, subtitleTracks = subtitleTracks, initialized = true))
+                mp4Regex.containsMatchIn(videoUrl) -> listOf(
+                    PlayableStream(
+                        id = videoUrl,
+                        title = "$prefix: MP4",
+                        request = MediaRequest(uri = videoUrl, headers = videoHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
+                        subtitleTracks = subtitleTracks,
+                    ),
+                )
                 else -> emptyList()
             }
         }
@@ -160,7 +170,7 @@ class MegaUpExtractor(
         fun subtitleTracks(): List<SubtitleTrack> = tracks
             .filter { it.kind == "captions" && it.file.endsWith(".vtt", ignoreCase = true) }
             .sortedByDescending { it.default }
-            .map { SubtitleTrack(it.file, it.label ?: "Unknown") }
+            .map { SubtitleTrack(id = it.file, request = MediaRequest(uri = it.file), language = it.label ?: "Unknown") }
     }
 
     @Serializable

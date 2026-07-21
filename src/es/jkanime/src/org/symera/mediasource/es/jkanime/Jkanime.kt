@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
+import org.symera.mediasource.core.Source
 import org.symera.mediasource.core.bodyString
 import org.symera.mediasource.core.parseAs
 import org.symera.mediasource.es.jkanime.extractors.JkanimeExtractor
@@ -21,12 +22,19 @@ import org.symera.mediasource.lib.streamtape.StreamTapeExtractor
 import org.symera.mediasource.lib.universal.UniversalExtractor
 import org.symera.mediasource.lib.vidhide.VidHideExtractor
 import org.symera.mediasource.lib.voe.VoeExtractor
-import org.symera.source.ConfigurableSymeraSource
+import org.symera.source.CatalogCapability
+import org.symera.source.CatalogFeed
+import org.symera.source.SourceCapability
+import org.symera.source.SourceEnvironment
+import org.symera.source.SymeraExtensionFactory
+import org.symera.source.model.ContentCategory
 import org.symera.source.model.ContentPage
 import org.symera.source.model.ContentStatus
 import org.symera.source.model.ContentType
 import org.symera.source.model.Filter
 import org.symera.source.model.FilterList
+import org.symera.source.model.PageRequest
+import org.symera.source.model.PlayableItemType
 import org.symera.source.model.SContent
 import org.symera.source.model.SHoster
 import org.symera.source.model.SPlayableItem
@@ -34,21 +42,17 @@ import org.symera.source.model.SStream
 import org.symera.source.model.SourcePreference
 import org.symera.source.online.GET
 import org.symera.source.online.POST
-import org.symera.source.online.SymeraHttpSource
 import org.symera.source.online.asJsoup
-import org.symera.source.preferenceValues
-import java.text.SimpleDateFormat
-import java.util.Locale
 
-class Jkanime :
-    SymeraHttpSource(),
-    ConfigurableSymeraSource {
+class Jkanime(environment: SourceEnvironment) : Source(environment) {
     override val name = "Jkanime"
     override val baseUrl = "https://jkanime.net"
     override val lang = "es"
-    override val contentTypes = setOf(ContentType.ANIME, ContentType.SERIES, ContentType.MOVIE)
+    override val contentTypes = setOf(ContentType.SERIES, ContentType.MOVIE)
+    override val catalogCapabilities = setOf(CatalogCapability.MOVIES, CatalogCapability.SERIES, CatalogCapability.SEARCH)
+    override val sourceCapabilities = setOf(SourceCapability.PLAYABLE_ITEMS, SourceCapability.HOSTERS)
 
-    private val baseClient: OkHttpClient by lazy { defaultClientProvider() }
+    private val baseClient: OkHttpClient by lazy { environment.httpClient }
 
     private val noRedirectClient: OkHttpClient by lazy {
         baseClient.newBuilder()
@@ -81,17 +85,17 @@ class Jkanime :
             }.build()
     }
 
-    private val json = Json {
+    override val json = Json {
         isLenient = true
         ignoreUnknownKeys = true
         explicitNulls = false
     }
 
-    override fun moviesRequest(page: Int): Request = directoryRequest(page, type = "peliculas")
+    override fun moviesRequest(request: PageRequest, filters: FilterList): Request = directoryRequest(request.page, type = "peliculas")
 
     override fun moviesParse(response: Response): ContentPage = searchParse(response)
 
-    override fun seriesRequest(page: Int): Request = directoryRequest(page, type = "animes")
+    override fun seriesRequest(request: PageRequest, filters: FilterList): Request = directoryRequest(request.page, type = "animes")
 
     override fun seriesParse(response: Response): ContentPage = searchParse(response)
 
@@ -103,8 +107,8 @@ class Jkanime :
         return GET(url.toString(), headers)
     }
 
-    override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
-        val filterList = if (filters.isEmpty()) getFilterList() else filters
+    override fun searchRequest(request: PageRequest, query: String, filters: FilterList): Request {
+        val filterList = filters
         val dayFilter = filterList.find { it is DayFilter } as? DayFilter
         val url = baseUrl.toHttpUrl().newBuilder().apply {
             when {
@@ -119,7 +123,7 @@ class Jkanime :
                 }
                 else -> {
                     addPathSegment("directorio")
-                    addQueryParameter("p", page.toString())
+                    addQueryParameter("p", request.page.toString())
                     filterList.filterIsInstance<UriPartFilterInterface>()
                         .mapNotNull { it.toQueryParam() }
                         .forEach { (name, value) -> addQueryParameter(name, value) }
@@ -149,15 +153,16 @@ class Jkanime :
             ?: return ContentPage.Empty
 
         val contents = animePageJson.data.map { animeDto ->
-            SContent.create().apply {
-                setUrlWithoutDomain(animeDto.url)
-                title = animeDto.title
-                description = animeDto.synopsis
-                posterUrl = animeDto.thumbnailUrl
-                genres = animeDto.studios?.takeIf(String::isNotBlank)?.let(::listOf)
-                status = animeDto.status?.let(::parseStatus) ?: ContentStatus.UNKNOWN
-                contentType = animeDto.type?.let(::parseContentType)
-            }
+            SContent(
+                url = relativeUrl(animeDto.url),
+                title = animeDto.title,
+                description = animeDto.synopsis,
+                posterUrl = animeDto.thumbnailUrl,
+                genres = animeDto.studios?.takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
+                status = animeDto.status?.let(::parseStatus),
+                contentType = animeDto.type?.let(::parseContentType),
+                categories = setOf(ContentCategory.ANIME),
+            )
         }
         return ContentPage(contents, !animePageJson.nextPageUrl.isNullOrBlank())
     }
@@ -166,12 +171,13 @@ class Jkanime :
         val contents = document.select("div.row div.row.page_directorio div.anime__item")
             .mapNotNull { element ->
                 val itemText = element.selectFirst("div.anime__item__text a") ?: return@mapNotNull null
-                SContent.create().apply {
-                    title = itemText.text()
-                    posterUrl = element.selectFirst("div.g-0")?.attr("abs:data-setbg")
-                    setUrlWithoutDomain(itemText.attr("href"))
-                    contentType = ContentType.ANIME
-                }
+                SContent(
+                    url = relativeUrl(itemText.attr("abs:href")),
+                    title = itemText.text(),
+                    posterUrl = element.selectFirst("div.g-0")?.attr("abs:data-setbg"),
+                    contentType = ContentType.SERIES,
+                    categories = setOf(ContentCategory.ANIME),
+                )
             }
         return ContentPage(contents, false)
     }
@@ -180,13 +186,15 @@ class Jkanime :
         val day = document.location().substringAfterLast("#")
         val animeBox = document.selectFirst("h2:contains($day) ~ div.cajas")
         val contents = animeBox?.select("div.boxx")?.mapNotNull { element ->
-            SContent.create().apply {
-                val url = element.selectFirst("a")?.attr("abs:href")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                setUrlWithoutDomain(url)
-                title = element.selectFirst("img")?.attr("title") ?: return@mapNotNull null
-                posterUrl = element.selectFirst("img")?.attr("abs:src")
-                contentType = ContentType.ANIME
-            }
+            val url = element.selectFirst("a")?.attr("abs:href")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val title = element.selectFirst("img")?.attr("title")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            SContent(
+                url = relativeUrl(url),
+                title = title,
+                posterUrl = element.selectFirst("img")?.attr("abs:src"),
+                contentType = ContentType.SERIES,
+                categories = setOf(ContentCategory.ANIME),
+            )
         } ?: emptyList()
 
         return ContentPage(contents, false)
@@ -194,22 +202,17 @@ class Jkanime :
 
     override fun contentDetailsParse(response: Response): SContent {
         val document = response.asJsoup()
-        return SContent.create().apply {
-            document.selectFirst("div.anime__details__content div.anime_pic img")?.attr("abs:src")?.let { posterUrl = it }
-            document.selectFirst("div.anime__details__content div.anime_info h3")?.text()?.let { title = it }
-            document.selectFirst("div.anime__details__content div.anime_info p.scroll")?.text()?.let { description = it }
-            url = response.request.url.encodedPath
-            contentType = ContentType.ANIME
-            document.select("div.anime__details__content div.anime_data.pc li").forEach { animeData ->
-                val data = animeData.select("span").text()
-                if (data.contains("Generos:")) {
-                    genres = animeData.select("a").map { it.text() }
-                }
-                if (data.contains("Estado")) {
-                    status = parseStatus(animeData.select("div").text())
-                }
-            }
-        }
+        val metadata = document.select("div.anime__details__content div.anime_data.pc li")
+        return SContent(
+            url = relativeUrl(response.request.url.toString()),
+            title = document.selectFirst("div.anime__details__content div.anime_info h3")?.text()?.ifBlank { null } ?: "Unknown",
+            description = document.selectFirst("div.anime__details__content div.anime_info p.scroll")?.text(),
+            posterUrl = document.selectFirst("div.anime__details__content div.anime_pic img")?.attr("abs:src"),
+            genres = metadata.firstOrNull { it.select("span").text().contains("Generos:") }?.select("a")?.map { it.text() }.orEmpty(),
+            status = metadata.firstOrNull { it.select("span").text().contains("Estado") }?.let { parseStatus(it.select("div").text()) },
+            contentType = ContentType.SERIES,
+            categories = setOf(ContentCategory.ANIME),
+        )
     }
 
     override fun playableItemsParse(response: Response): List<SPlayableItem> {
@@ -238,19 +241,20 @@ class Jkanime :
     }
 
     private fun List<EpisodeDto>.toPlayableItemList(animeUrl: String): List<SPlayableItem> = map { episode ->
-        SPlayableItem.create().apply {
-            episodeNumber = episode.number.toDouble()
-            title = "Episodio ${episode.number}"
-            airDate = episode.timestamp?.toDate() ?: 0L
+        SPlayableItem(
+            url = relativeUrl("$animeUrl/${episode.number}"),
+            title = "Episodio ${episode.number}",
+            type = PlayableItemType.EPISODE,
+            episodeNumber = org.symera.source.model.EpisodeNumber(episode.number),
+            airDate = episode.timestamp?.toSourceDate(),
             thumbnailUrl = episode.image?.let { img ->
                 if (img.startsWith("http://") || img.startsWith("https://")) {
                     img
                 } else {
                     CDN_THUMBNAIL_BASE + img
                 }
-            }
-            setUrlWithoutDomain("$animeUrl/${episode.number}")
-        }
+            },
+        )
     }
 
     private fun fetchAnimeEpisodes(animeId: String, currentPage: Int, cookieHeaders: Headers, formData: FormBody): EpisodesPageDto = client.newCall(POST("$baseUrl/ajax/episodes/$animeId/$currentPage", headers = cookieHeaders, body = formData))
@@ -261,21 +265,20 @@ class Jkanime :
         return getVideoLinks(document).map { (url, lang, name) ->
             val matched = serverMatching.firstOrNull { (_, names) -> names.any { it.lowercase() in url.lowercase() } }?.first ?: name.lowercase()
             SHoster(
-                hosterUrl = url,
-                hosterName = matched,
-                displayName = listOf(lang, name.ifBlank { matched }).filter { it.isNotBlank() }.joinToString(" "),
-                internalData = listOf(lang, name, matched).joinToString("\t"),
-                lazy = true,
+                id = url,
+                name = listOf(lang, name.ifBlank { matched }).filter { it.isNotBlank() }.joinToString(" "),
+                requestUrl = url,
+                resolverData = listOf(lang, name, matched).joinToString("\t"),
             )
         }
     }
 
     override suspend fun getStreams(hoster: SHoster): List<SStream> {
-        val parts = hoster.internalData.split('\t', limit = 3)
+        val parts = hoster.resolverData.orEmpty().split('\t', limit = 3)
         val streamLang = parts.getOrNull(0).orEmpty()
         val name = parts.getOrNull(1).orEmpty()
-        val matched = parts.getOrNull(2).orEmpty().ifBlank { hoster.hosterName }
-        val url = hoster.hosterUrl
+        val matched = parts.getOrNull(2).orEmpty().ifBlank { hoster.name }
+        val url = hoster.requestUrl ?: return emptyList()
 
         return when (matched) {
             "okru" -> okruExtractor.streamsFromUrl(url, streamLang)
@@ -294,8 +297,6 @@ class Jkanime :
             else -> universalExtractor.streamsFromUrl(url, headers, prefix = "$streamLang $name")
         }.sortStreams()
     }
-
-    override fun streamsParse(response: Response, hoster: SHoster): List<SStream> = emptyList()
 
     private fun getVideoLinks(document: Document): List<Triple<String, String, String>> {
         val scriptServers = document.selectFirst("script:containsData(var video = [];)")?.data() ?: return emptyList()
@@ -330,37 +331,40 @@ class Jkanime :
     }
 
     override fun List<SStream>.sortStreams(): List<SStream> {
-        val preferences = preferenceValues()
+        val preferences = environment.preferencesFor(sourcePreferenceNamespace)
         val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)
         val server = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)
         val language = preferences.getString(PREF_LANGUAGE_KEY, PREF_LANGUAGE_DEFAULT)
         return sortedWith(
             compareBy(
-                { it.title.contains(language) },
-                { it.title.contains(server, true) },
-                { it.title.contains(quality) },
-                { Regex("""(\d+)p""").find(it.title)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
+                { it.title.orEmpty().contains(language) },
+                { it.title.orEmpty().contains(server, true) },
+                { it.title.orEmpty().contains(quality) },
+                { Regex("""(\d+)p""").find(it.title.orEmpty())?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
             ),
         ).reversed()
     }
 
-    override fun getFilterList() = FilterList(
-        Filter.Header("La búsqueda por texto no incluye filtros"),
-        GenreFilter(),
-        LetterFilter(),
-        DemographyFilter(),
-        CategoryFilter(),
-        TypeFilter(),
-        StateFilter(),
-        Filter.Header("Búsqueda por año"),
-        YearFilter(),
-        SeasonFilter(),
-        Filter.Header("Filtros de ordenamiento"),
-        OrderByFilter(),
-        SortModifiers(),
-        Filter.Separator(),
-        DayFilter(),
-    )
+    override fun getFilterList(feed: CatalogFeed) = when (feed) {
+        CatalogFeed.SEARCH -> FilterList(
+            Filter.Header("La búsqueda por texto no incluye filtros"),
+            GenreFilter(),
+            LetterFilter(),
+            DemographyFilter(),
+            CategoryFilter(),
+            TypeFilter(),
+            StateFilter(),
+            Filter.Header("Búsqueda por año"),
+            YearFilter(),
+            SeasonFilter(),
+            Filter.Header("Filtros de ordenamiento"),
+            OrderByFilter(),
+            SortModifiers(),
+            Filter.Separator(),
+            DayFilter(),
+        )
+        else -> FilterList()
+    }
 
     override fun getSourcePreferences(): List<SourcePreference<*>> = listOf(
         SourcePreference.Select(
@@ -389,22 +393,25 @@ class Jkanime :
     private val languages = arrayOf(1 to "[JAP]", 3 to "[LAT]", 4 to "[CHIN]")
     private fun Int?.getLang() = languages.firstOrNull { it.first == this }?.second ?: ""
 
-    private fun parseStatus(statusString: String): ContentStatus = when {
+    private fun parseStatus(statusString: String): ContentStatus? = when {
         statusString.contains("Por estrenar", true) -> ContentStatus.ONGOING
         statusString.contains("En emision", true) -> ContentStatus.ONGOING
         statusString.contains("En emisión", true) -> ContentStatus.ONGOING
         statusString.contains("Concluido", true) -> ContentStatus.COMPLETED
         statusString.contains("Finalizado", true) -> ContentStatus.COMPLETED
-        else -> ContentStatus.UNKNOWN
+        else -> null
     }
 
     private fun parseContentType(type: String): ContentType = when {
         type.contains("pel", true) -> ContentType.MOVIE
         type.contains("ova", true) || type.contains("ona", true) || type.contains("especial", true) -> ContentType.OTHER
-        else -> ContentType.ANIME
+        else -> ContentType.SERIES
     }
 
-    private fun String.toDate(): Long = runCatching { DATE_FORMATTER.parse(trim())?.time }.getOrNull() ?: 0L
+    private fun String.toSourceDate() = runCatching {
+        val (year, month, day) = trim().take(10).split('-').map(String::toInt)
+        org.symera.source.model.SourceDate(year, month, day)
+    }.getOrNull()
 
     private val okruExtractor by lazy { OkruExtractor(client) }
     private val voeExtractor by lazy { VoeExtractor(client, headers) }
@@ -447,7 +454,6 @@ class Jkanime :
         )
         private val PREF_SERVER_DEFAULT = SERVER_LIST.first()
 
-        private val DATE_FORMATTER by lazy { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH) }
         private val animePagePattern by lazy {
             Regex(
                 """var\s+animes\s*=\s*(\{(?:[^"']|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')*?\})\s*;""",
@@ -470,4 +476,8 @@ class Jkanime :
             "mega" to listOf("mega.nz"),
         )
     }
+}
+
+object JkanimeFactory : SymeraExtensionFactory {
+    override fun createVodSources(environment: SourceEnvironment) = listOf(Jkanime(environment))
 }

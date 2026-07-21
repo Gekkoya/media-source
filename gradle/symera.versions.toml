@@ -3,7 +3,7 @@ android-sdk-compile = "36"
 android-sdk-min = "24"
 android-sdk-target = "36"
 java = "17"
-source-sdk = "2"
+source-sdk = "4"
 
 [plugins]
 android-base = { id = "symera.plugins.android.base" }

@@ -13,6 +13,9 @@ import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
@@ -86,11 +89,13 @@ class UniversalExtractor(private val client: OkHttpClient) {
             "mp4" in resultUrl -> {
                 Log.d("UniversalExtractor", "mp4 URL: $resultUrl")
                 listOf(
-                    SStream(
-                        url = resultUrl,
+                    PlayableStream(
+                        id = resultUrl,
                         title = "$prefix - $host: ${customQuality ?: "Mirror"}",
-                        headers = origRequestHeader.newBuilder().add("Referer", origRequestUrl).build(),
-                        initialized = true,
+                        request = MediaRequest(
+                            uri = resultUrl,
+                            headers = origRequestHeader.newBuilder().add("Referer", origRequestUrl).build().toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } },
+                        ),
                     ),
                 )
             }

@@ -3,6 +3,9 @@ package org.symera.mediasource.lib.mixdrop
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import org.symera.mediasource.lib.unpacker.Unpacker
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
 import org.symera.source.online.GET
@@ -32,7 +35,11 @@ class MixDropExtractor(private val client: OkHttpClient) {
         val videoUrl = "https:" + unpacked.substringAfter("Core.wurl=\"").substringBefore("\"")
         val subs = unpacked.substringAfter("Core.remotesub=\"").substringBefore('"')
             .takeIf(String::isNotBlank)
-            ?.let { listOf(SubtitleTrack(URLDecoder.decode(it, "utf-8"), "sub")) }
+            ?.let { decodedUrl ->
+                URLDecoder.decode(decodedUrl, "utf-8").let { subtitleUrl ->
+                    listOf(SubtitleTrack(id = subtitleUrl, request = MediaRequest(uri = subtitleUrl), language = "sub"))
+                }
+            }
             ?: emptyList()
 
         val quality = buildString {
@@ -41,12 +48,11 @@ class MixDropExtractor(private val client: OkHttpClient) {
         }
 
         return listOf(
-            SStream(
-                url = videoUrl,
+            PlayableStream(
+                id = videoUrl,
                 title = quality,
-                headers = headers,
+                request = MediaRequest(uri = videoUrl, headers = headers.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
                 subtitleTracks = subs + externalSubs,
-                initialized = true,
             ),
         )
     }

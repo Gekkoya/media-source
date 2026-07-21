@@ -6,6 +6,9 @@ import okhttp3.OkHttpClient
 import org.symera.mediasource.core.commonEmptyHeaders
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
 import org.symera.mediasource.lib.unpacker.JsUnpacker
+import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.POST
@@ -42,7 +45,13 @@ class FastreamExtractor(private val client: OkHttpClient, private val headers: H
         if (videoUrl.contains(".m3u8")) {
             playlistUtils.extractFromHls(videoUrl, videoNameGen = { "$prefix$it" })
         } else {
-            listOf(SStream(url = videoUrl, title = prefix, headers = videoHeaders, initialized = true))
+            listOf(
+                PlayableStream(
+                    id = videoUrl,
+                    title = prefix,
+                    request = MediaRequest(uri = videoUrl, headers = videoHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
+                ),
+            )
         }
     }.getOrDefault(emptyList())
 
