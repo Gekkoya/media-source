@@ -5,7 +5,7 @@ plugins {
 ext {
     extName = 'Jkanime'
     extClass = '.JkanimeFactory'
-    extVersionCode = 10
+    extVersionCode = 18
 }
 
 apply plugin: "symera.plugins.extension"

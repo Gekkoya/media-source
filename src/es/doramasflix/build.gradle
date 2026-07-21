@@ -5,7 +5,7 @@ plugins {
 ext {
     extName = 'Doramasflix'
     extClass = '.DoramasflixFactory'
-    extVersionCode = 2
+    extVersionCode = 8
 }
 
 apply plugin: "symera.plugins.extension"
