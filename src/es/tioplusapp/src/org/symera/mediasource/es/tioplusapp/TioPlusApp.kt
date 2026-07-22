@@ -40,11 +40,10 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
     override val catalogCapabilities = setOf(CatalogCapability.MOVIES, CatalogCapability.SERIES, CatalogCapability.SEARCH)
     override val sourceCapabilities = setOf(SourceCapability.PLAYABLE_ITEMS, SourceCapability.HOSTERS)
 
-    override fun headersBuilder() =
-        super.headersBuilder()
-            .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            .add("Accept-Language", "es-ES,es;q=0.9,en;q=0.8")
-            .add("Referer", "$baseUrl/")
+    override fun headersBuilder() = super.headersBuilder()
+        .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .add("Accept-Language", "es-ES,es;q=0.9,en;q=0.8")
+        .add("Referer", "$baseUrl/")
 
     override val json = Json {
         isLenient = true
