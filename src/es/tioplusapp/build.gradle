@@ -10,3 +10,8 @@ ext {
 }
 
 apply plugin: "symera.plugins.extension"
+
+dependencies {
+    implementation(project(':lib:emturbo'))
+    implementation(project(':lib:playlistutils'))
+}

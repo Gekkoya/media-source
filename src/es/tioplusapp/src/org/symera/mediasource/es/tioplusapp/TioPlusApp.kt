@@ -7,10 +7,12 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Element
 import org.symera.mediasource.core.parseAs
+import org.symera.mediasource.lib.emturbo.EmTurboExtractor
 import org.symera.mediasource.multisrc.pelisplus.PelisPlus
 import org.symera.source.CatalogCapability
 import org.symera.source.CatalogFeed
@@ -19,6 +21,7 @@ import org.symera.source.SourceEnvironment
 import org.symera.source.SymeraExtensionFactory
 import org.symera.source.model.ContentPage
 import org.symera.source.model.ContentStatus
+import org.symera.source.model.ContentStructure
 import org.symera.source.model.ContentType
 import org.symera.source.model.Filter
 import org.symera.source.model.FilterList
@@ -27,6 +30,7 @@ import org.symera.source.model.PlayableItemType
 import org.symera.source.model.SContent
 import org.symera.source.model.SHoster
 import org.symera.source.model.SPlayableItem
+import org.symera.source.model.SSeason
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.asJsoup
@@ -38,7 +42,7 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
     override val lang = "es"
     override val contentTypes = setOf(ContentType.MOVIE, ContentType.SERIES)
     override val catalogCapabilities = setOf(CatalogCapability.MOVIES, CatalogCapability.SERIES, CatalogCapability.SEARCH)
-    override val sourceCapabilities = setOf(SourceCapability.PLAYABLE_ITEMS, SourceCapability.HOSTERS)
+    override val sourceCapabilities = setOf(SourceCapability.PLAYABLE_ITEMS, SourceCapability.SEASONS, SourceCapability.HOSTERS)
 
     override fun headersBuilder() = super.headersBuilder()
         .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -51,18 +55,29 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
         explicitNulls = false
     }
 
-    override fun moviesRequest(request: PageRequest, filters: FilterList): Request = GET("$baseUrl/peliculas?page=${request.page}", headers)
+    override fun moviesRequest(request: PageRequest, filters: FilterList): Request = GET(pagedUrl("peliculas", request.page), headers)
 
     override fun moviesParse(response: Response): ContentPage = parseListing(response)
 
-    override fun seriesRequest(request: PageRequest, filters: FilterList): Request = GET("$baseUrl/series?page=${request.page}", headers)
+    override fun seriesRequest(request: PageRequest, filters: FilterList): Request {
+        val section = filters.filterIsInstance<SeriesSectionFilter>().firstOrNull()?.toUriPart() ?: "series"
+        return GET(pagedUrl(section, request.page), headers)
+    }
 
     override fun seriesParse(response: Response): ContentPage = parseListing(response)
 
     override fun searchRequest(request: PageRequest, query: String, filters: FilterList): Request {
         val genreFilter = filters.filterIsInstance<GenreFilter>().firstOrNull() ?: GenreFilter()
         return when {
-            query.isNotBlank() -> GET("$baseUrl/api/search/$query", headers)
+            query.isNotBlank() -> GET(
+                baseUrl.toHttpUrl().newBuilder()
+                    .addPathSegment("api")
+                    .addPathSegment("search")
+                    .addPathSegment(query)
+                    .addQueryParameter("page", request.page.toString())
+                    .build(),
+                headers,
+            )
             genreFilter.state != 0 -> GET("$baseUrl/${genreFilter.toUriPart()}?page=${request.page}", headers)
             else -> moviesRequest(request, filters)
         }
@@ -77,6 +92,8 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
         return ContentPage(contents, hasNextPage)
     }
 
+    private fun pagedUrl(section: String, page: Int): String = "$baseUrl/$section" + if (page > 1) "/$page" else ""
+
     private fun contentFromElement(element: Element): SContent? {
         val link = element.selectFirst("a") ?: return null
         val title = element.selectFirst("a h2")?.text()?.takeIf { it.isNotBlank() } ?: return null
@@ -86,6 +103,7 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
             posterUrl = element.selectFirst("a .item__image picture img")?.attr("abs:data-src")
                 ?: element.selectFirst("a .item__image picture img")?.attr("abs:src"),
             contentType = parseType(link.attr("abs:href")),
+            structure = structureFor(parseType(link.attr("abs:href"))),
         )
     }
 
@@ -96,9 +114,19 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
             url = url,
             title = document.selectFirst(".home__slider_content div h1.slugh1")?.text()?.ifBlank { null } ?: "Unknown",
             description = document.selectFirst(".home__slider_content .description")?.text(),
-            genres = document.select(".home__slider_content div:nth-child(5) > a").map { it.text() },
+            posterUrl = document.selectFirst("meta[property=og:image]")?.attr("abs:content")?.ifBlank { null },
+            backdropUrl = document.selectFirst(".home__slider .bg")?.attr("style")
+                ?.substringAfter("url(\"")
+                ?.substringBefore("\")")
+                ?.ifBlank { null },
+            genres = document.select(".home__slider_content .genres")
+                .firstOrNull { it.text().contains("Generos", ignoreCase = true) }
+                ?.select("a")
+                ?.map { it.text() }
+                .orEmpty(),
             status = ContentStatus.COMPLETED,
             contentType = parseType(url),
+            structure = structureFor(parseType(url)),
         )
     }
 
@@ -111,23 +139,27 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
             )
         }
 
+        return parseSeasons(document, relativeUrl(contentUrl)).flatMap { it.playableItems.orEmpty() }
+    }
+
+    override fun seasonsParse(response: Response): List<SSeason> = parseSeasons(response.asJsoup(), relativeUrl(response.request.url.toString().trimEnd('/')))
+
+    private fun parseSeasons(document: org.jsoup.nodes.Document, contentUrl: String): List<SSeason> {
         val seasonsData = document.selectFirst("script:containsData(const seasonUrl =)")?.data() ?: return emptyList()
         val seasonsJson = seasonsData.substringAfter("seasonsJson = ").substringBefore(";")
         val seasons = seasonsJson.parseAs<JsonObject>(json)
-        var index = 0
-        return seasons.entries.flatMap { (_, episodes) ->
-            episodes.jsonArray.reversed().map { element ->
-                index += 1
+        return seasons.entries.mapNotNull { (seasonKey, episodes) ->
+            val season = seasonKey.toIntOrNull() ?: return@mapNotNull null
+            val playableItems = episodes.jsonArray.mapNotNull { element ->
                 val episode = element.jsonObject
-                val season = episode["season"]?.jsonPrimitive?.content.orEmpty()
+                val episodeNumber = episode["episode"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 val title = episode["title"]?.jsonPrimitive?.content.orEmpty()
-                val episodeNumber = episode["episode"]?.jsonPrimitive?.content.orEmpty()
                 SPlayableItem(
-                    url = relativeUrl("$contentUrl/season/$season/episode/$episodeNumber"),
+                    url = "$contentUrl/season/$season/episode/$episodeNumber",
                     title = "T$season - E$episodeNumber - $title",
                     type = PlayableItemType.EPISODE,
-                    episodeNumber = org.symera.source.model.EpisodeNumber(index),
-                    seasonNumber = season.toIntOrNull(),
+                    episodeNumber = org.symera.source.model.EpisodeNumber(episodeNumber),
+                    seasonNumber = season,
                     thumbnailUrl = episode["image"]?.jsonPrimitive?.contentOrNull
                         ?.takeIf { it.isNotBlank() }
                         ?.let { image ->
@@ -139,13 +171,20 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
                         },
                 )
             }
-        }.reversed()
+            SSeason(
+                url = "$contentUrl/season/$season",
+                number = season,
+                title = "Temporada $season",
+                playableItems = playableItems,
+            )
+        }.sortedBy { it.number }
     }
 
     override fun hostersParse(response: Response): List<SHoster> {
         val document = response.use { it.asJsoup() }
         return document.select(".bg-tabs ul li").mapNotNull { element ->
             val prefix = element.parent()?.parent()?.selectFirst("button")?.ownText()?.lowercase()?.getLang().orEmpty()
+            val serverName = element.selectFirst("span")?.text()?.takeIf { it.isNotBlank() }.orEmpty()
             val encodedServer = element.attr("data-server").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val decoded = String(Base64.decode(encodedServer, Base64.DEFAULT))
 
@@ -165,33 +204,51 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
             }.replace("https://sblanh.com", "https://lvturbo.com")
                 .replace(Regex("([a-zA-Z0-9]{0,8}[a-zA-Z0-9_-]+)=https://ww3.pelisplus.to.*"), "")
 
-            videoUrl.takeIf { it.isNotBlank() }?.toHoster(prefix)
+            videoUrl
+                .takeIf { it.isNotBlank() && UNSUPPORTED_P2P_HOSTS.none { host -> host in it } }
+                ?.toHoster(prefix, serverName)
         }
     }
 
     override suspend fun getStreams(hoster: SHoster): List<SStream> {
         val url = hoster.requestUrl ?: return emptyList()
-        return serverVideoResolver(
-            url = url,
-            prefix = hoster.resolverData.orEmpty(),
-            serverName = hoster.name,
-        ).sortStreams()
+        return if ("emturbovid" in url) {
+            emTurboExtractor.streamsFromUrl(url, hoster.name)
+        } else {
+            serverVideoResolver(
+                url = url,
+                prefix = hoster.resolverData.orEmpty(),
+                serverName = hoster.name,
+            )
+        }.sortStreams()
     }
 
-    override fun getFilterList(feed: CatalogFeed): FilterList = if (feed == CatalogFeed.SEARCH) {
-        FilterList(Filter.Header("La búsqueda por género ignora los otros filtros"), GenreFilter())
-    } else {
-        FilterList()
+    override fun getFilterList(feed: CatalogFeed): FilterList = when (feed) {
+        CatalogFeed.SEARCH -> FilterList(Filter.Header("La búsqueda por género ignora los otros filtros"), GenreFilter())
+        CatalogFeed.SERIES -> FilterList(SeriesSectionFilter())
+        else -> FilterList()
     }
 
-    private fun String.toHoster(prefix: String): SHoster = SHoster(
+    private fun String.toHoster(prefix: String, serverName: String): SHoster = SHoster(
         id = this,
-        name = listOf(prefix, this).filter { it.isNotBlank() }.joinToString(" "),
+        name = listOf(prefix, serverName).filter { it.isNotBlank() }.joinToString(" "),
         requestUrl = this,
         resolverData = prefix,
     )
 
-    private fun parseType(url: String): ContentType = if (url.contains("/serie/")) ContentType.SERIES else ContentType.MOVIE
+    private fun parseType(url: String): ContentType = if (
+        url.contains("/serie/") || url.contains("/dorama/") || url.contains("/anime/")
+    ) {
+        ContentType.SERIES
+    } else {
+        ContentType.MOVIE
+    }
+
+    private fun structureFor(type: ContentType): ContentStructure = when (type) {
+        ContentType.MOVIE -> ContentStructure.SINGLE_ITEM
+        ContentType.SERIES -> ContentStructure.SEASONS
+        else -> ContentStructure.UNKNOWN
+    }
 
     private class GenreFilter :
         Filter.Select<Pair<String, String>>(
@@ -235,6 +292,16 @@ class TioPlusApp(environment: SourceEnvironment) : PelisPlus(environment) {
         ) {
         fun toUriPart() = values[state].second
     }
+
+    private class SeriesSectionFilter : Filter.Select<String>("Sección", listOf("Series", "Doramas", "Animes")) {
+        fun toUriPart() = values[state].lowercase()
+    }
+
+    private companion object {
+        val UNSUPPORTED_P2P_HOSTS = setOf("strp2p.com", "upns.pro", "4meplayer.pro")
+    }
+
+    private val emTurboExtractor by lazy { EmTurboExtractor(client, headers) }
 }
 
 object TioPlusAppFactory : SymeraExtensionFactory {
