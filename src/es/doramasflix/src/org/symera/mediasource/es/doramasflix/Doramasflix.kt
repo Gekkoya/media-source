@@ -9,18 +9,14 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import org.symera.mediasource.core.Source
 import org.symera.mediasource.core.mediaSourceJson
-import org.symera.mediasource.lib.dood.DoodExtractor
-import org.symera.mediasource.lib.filemoon.FilemoonExtractor
-import org.symera.mediasource.lib.streamtape.StreamTapeExtractor
-import org.symera.mediasource.lib.streamwish.StreamWishExtractor
-import org.symera.mediasource.lib.universal.UniversalExtractor
-import org.symera.mediasource.lib.voe.VoeExtractor
+import org.symera.mediasource.lib.fkplayer.FkPlayerDecoder
+import org.symera.mediasource.multisrc.pelisplus.PelisPlus
 import org.symera.source.CatalogCapability
 import org.symera.source.CatalogFeed
 import org.symera.source.SourceCapability
@@ -29,6 +25,7 @@ import org.symera.source.SymeraExtensionFactory
 import org.symera.source.model.ContentPage
 import org.symera.source.model.ContentRating
 import org.symera.source.model.ContentRelease
+import org.symera.source.model.ContentStructure
 import org.symera.source.model.ContentType
 import org.symera.source.model.FilterList
 import org.symera.source.model.PageRequest
@@ -39,9 +36,10 @@ import org.symera.source.model.SPlayableItem
 import org.symera.source.model.SSeason
 import org.symera.source.model.SStream
 import org.symera.source.network.awaitSuccess
+import org.symera.source.online.GET
 import org.symera.source.online.asJsoup
 
-class Doramasflix(environment: SourceEnvironment) : Source(environment) {
+class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
     override val name = "Doramasflix"
     override val baseUrl = "https://doramasflix.io"
     override val lang = "es"
@@ -224,7 +222,22 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
             paginationDorama(page: 1, perPage: 1, filter: { slug: ${dollar}slug }) {
                 items {
                     _id
+                    name
+                    name_es
                     slug
+                    overview
+                    original_name
+                    poster_path
+                    backdrop_path
+                    first_air_date
+                    vote_average
+                    number_of_seasons
+                    number_of_episodes
+                    type
+                    status
+                    languages
+                    genres { name slug }
+                    seasons { slug season_number number_of_episodes _id ref }
                 }
             }
         }
@@ -235,7 +248,20 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
             paginationMovie(page: 1, perPage: 1, filter: { slug: ${dollar}slug }) {
                 items {
                     _id
+                    name
+                    name_es
+                    title
                     slug
+                    overview
+                    poster_path
+                    backdrop_path
+                    release_date
+                    vote_average
+                    runtime
+                    type
+                    status
+                    languages
+                    genres { name slug }
                 }
             }
         }
@@ -309,8 +335,10 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
 
     override fun searchRequest(request: PageRequest, query: String, filters: FilterList): Request {
         if (query.isNotBlank()) {
+            val typeFilter = filters.filterIsInstance<ContentTypeFilter>().firstOrNull()
+            val queryText = if (typeFilter?.toValue() == "pelicula") searchMovieQuery else searchDoramaQuery
             return gqlRequest(
-                searchDoramaQuery,
+                queryText,
                 buildJsonObject { put("input", JsonPrimitive(query)) },
             )
         }
@@ -343,15 +371,23 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
 
     // region Details
 
+    override suspend fun getDetails(content: SContent): SContent {
+        val slug = content.url.substringBefore("?").substringAfterLast("/")
+        val details =
+            if (content.contentType == ContentType.MOVIE) {
+                findMovieBySlug(slug)?.toSContent()
+            } else {
+                findDoramaBySlug(slug)?.toSContent()
+            }
+        return (details ?: content).copy(url = content.url, initialized = true)
+    }
+
     override fun contentDetailsParse(response: Response): SContent {
         val doc = response.asJsoup()
-        val nextDataEl = doc.selectFirst("script#__NEXT_DATA__") ?: return SContent(
-            url = relativeUrl(response.request.url.toString()),
-            title = "Unknown",
-        )
+        val nextDataEl = doc.selectFirst("script#__NEXT_DATA__") ?: return htmlDetails(response, doc)
         val nextData = strictJson.parseToJsonElement(nextDataEl.data()).jsonObject
         val apolloState = nextData["props"]?.jsonObject?.get("pageProps")?.jsonObject?.get("apolloState")?.jsonObject
-            ?: return SContent(url = relativeUrl(response.request.url.toString()), title = "Unknown")
+            ?: return htmlDetails(response, doc)
 
         val doramaEntry = apolloState.entries.firstOrNull {
             it.key.startsWith("Dorama:")
@@ -386,13 +422,30 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
         )
     }
 
+    private fun htmlDetails(response: Response, doc: org.jsoup.nodes.Document): SContent {
+        val url = relativeUrl(response.request.url.toString())
+        val type = if (url.contains("/peliculas/")) ContentType.MOVIE else ContentType.SERIES
+        return SContent(
+            url = url,
+            title = doc.selectFirst("meta[property=og:title]")?.attr("content")?.ifBlank { null } ?: "Unknown",
+            posterUrl = doc.selectFirst("meta[property=og:image]")?.attr("content")?.ifBlank { null },
+            contentType = type,
+            structure = if (type == ContentType.MOVIE) ContentStructure.SINGLE_ITEM else ContentStructure.SEASONS,
+        )
+    }
+
     // endregion
 
     // region Seasons
 
     override suspend fun getSeasons(content: SContent): List<SSeason> {
         if (content.contentType == ContentType.MOVIE) return emptyList()
-        return super.getSeasons(content)
+        val contentId = extractIdFromUrl(content.url)
+            ?: findContentIdBySlug(content.url.substringAfterLast("/").substringBefore("?"))
+            ?: return emptyList()
+        return super.getSeasons(content).map { season ->
+            season.copy(playableItems = loadEpisodes(contentId, season.number.toDouble()))
+        }
     }
 
     override fun seasonsRequest(content: SContent): Request {
@@ -446,17 +499,19 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
         return seasons.flatMap { season ->
             val seasonNumber = season.jsonObject["season_number"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
                 ?: return@flatMap emptyList()
-            client.awaitSuccess(
-                gqlRequest(
-                    listEpisodesQuery,
-                    buildJsonObject {
-                        put("serieId", JsonPrimitive(contentId))
-                        put("seasonNumber", JsonPrimitive(seasonNumber))
-                    },
-                ),
-            ).use(::parsePlayableItems)
+            loadEpisodes(contentId, seasonNumber)
         }
     }
+
+    private suspend fun loadEpisodes(contentId: String, seasonNumber: Double): List<SPlayableItem> = client.awaitSuccess(
+        gqlRequest(
+            listEpisodesQuery,
+            buildJsonObject {
+                put("serieId", JsonPrimitive(contentId))
+                put("seasonNumber", JsonPrimitive(seasonNumber))
+            },
+        ),
+    ).use(::parsePlayableItems)
 
     private fun extractIdFromUrl(url: String): String? {
         val queryStart = url.indexOf("?_id=")
@@ -466,12 +521,21 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
     }
 
     private suspend fun findContentIdBySlug(slug: String): String? {
-        val doramaId = findIdBySlug(slug, findDoramaBySlugQuery)
+        val doramaId = findDoramaBySlug(slug)?.id
         if (doramaId != null) return doramaId
-        return findIdBySlug(slug, findMovieBySlugQuery)
+        return findMovieBySlug(slug)?.id
     }
 
-    private suspend fun findIdBySlug(slug: String, query: String): String? {
+    private suspend fun findDoramaBySlug(slug: String): DoramaDto? = findBySlug(slug, findDoramaBySlugQuery, "paginationDorama", DoramaDto.serializer())
+
+    private suspend fun findMovieBySlug(slug: String): MovieDto? = findBySlug(slug, findMovieBySlugQuery, "paginationMovie", MovieDto.serializer())
+
+    private suspend fun <T> findBySlug(
+        slug: String,
+        query: String,
+        resultKey: String,
+        serializer: kotlinx.serialization.KSerializer<T>,
+    ): T? {
         val response = client.awaitSuccess(
             gqlRequest(
                 query,
@@ -480,8 +544,8 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
         )
         return response.use { resp ->
             val data = parseGqlData(resp)
-            val pagination = data["paginationDorama"]?.jsonObject ?: data["paginationMovie"]?.jsonObject
-            pagination?.get("items")?.jsonArray?.firstOrNull()?.jsonObject?.get("_id")?.jsonPrimitive?.contentOrNull
+            val item = data[resultKey]?.jsonObject?.get("items")?.jsonArray?.firstOrNull() ?: return@use null
+            strictJson.decodeFromString(serializer, item.toString())
         }
     }
 
@@ -539,53 +603,65 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
 
             val link = obj["link"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
             val langId = obj["lang"]?.jsonPrimitive?.contentOrNull
-            val lang = getLang(langId)
+            val lang = linkLanguage(langId)
             val serverName = obj["server"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val embed = obj["embed"]?.jsonPrimitive?.contentOrNull
+            val playbackUrl = obj["embed"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: link
+            if (RETIRED_HOSTS.any { it in playbackUrl.lowercase() }) return@mapNotNull null
             val hosterName = extractHosterName(
-                embed ?: link,
+                playbackUrl,
                 if (serverName.all(Char::isDigit)) "" else serverName,
             )
 
             SHoster(
-                id = link,
+                id = playbackUrl,
                 name = "$lang $hosterName".trim(),
-                requestUrl = link,
-                resolverData = link,
+                requestUrl = playbackUrl,
+                resolverData = playbackUrl,
             )
         }
     }
 
     override suspend fun getStreams(hoster: SHoster): List<SStream> {
         val url = decodeFkPlayerUrl(hoster.requestUrl ?: return emptyList())
-        return when {
-            "dood" in url || "d-s.io" in url || "dsvplay" in url || "do7go" in url ->
-                doodExtractor.streamsFromUrl(url, hoster.name)
-            "voe" in url || "tubelessceliolymph" in url || "simpulumlamerop" in url ->
-                voeExtractor.streamsFromUrl(url, hoster.name)
-            "streamtape" in url || "stp" in url || "stape" in url ->
-                streamTapeExtractor.streamsFromUrl(url, hoster.name)
-            "streamwish" in url || "sfastwish" in url || "wishembed" in url || "strwish" in url ->
-                streamWishExtractor.streamsFromUrl(url, hoster.name)
-            "filemoon" in url || "moonplayer" in url || "files.im" in url ->
-                filemoonExtractor.streamsFromUrl(url, prefix = hoster.name)
-            else ->
-                universalExtractor.streamsFromUrl(url, headers, prefix = hoster.name)
-        }.sortStreams()
+        return serverVideoResolver(url, hoster.name, hoster.name).sortStreams()
     }
 
-    private fun decodeFkPlayerUrl(url: String): String {
+    private suspend fun decodeFkPlayerUrl(url: String): String {
         if (!url.contains("fkplayer.xyz")) return url
+        FkPlayerDecoder.decode(url)?.let { return it }
+        // Legacy fallback: /api/decoding with a page token.
         return try {
-            val token = url.substringAfterLast("/").substringBefore("?")
-            val payload = token.split('.').getOrNull(1) ?: return url
-            val encodedUrl = strictJson.parseToJsonElement(
-                String(Base64.decode(payload, Base64.URL_SAFE or Base64.NO_WRAP)),
-            )
-                .jsonObject["link"]
-                ?.jsonPrimitive
-                ?.contentOrNull
+            val tokenJson = client.awaitSuccess(GET(url, headers)).use { response ->
+                response.asJsoup()
+                    .selectFirst("script:containsData({\"props\":{\"pageProps\":{)")
+                    ?.data()
+                    ?: return url
+            }
+            val tokenRoot = strictJson.parseToJsonElement(tokenJson).jsonObject
+            val token = tokenRoot["props"]?.jsonObject
+                ?.get("pageProps")?.jsonObject
+                ?.get("token")?.jsonPrimitive?.contentOrNull
+                ?: tokenRoot["query"]?.jsonObject?.get("token")?.jsonPrimitive?.contentOrNull
                 ?: return url
+            val payload = buildJsonObject { put("token", JsonPrimitive(token)) }
+                .toString()
+                .toRequestBody(jsonMediaType)
+            val decoderHeaders = headers.newBuilder()
+                .add("origin", "https://${url.toHttpUrl().host}")
+                .build()
+            val encodedUrl = client.awaitSuccess(
+                Request.Builder()
+                    .url("https://fkplayer.xyz/api/decoding")
+                    .headers(decoderHeaders)
+                    .post(payload)
+                    .build(),
+            ).use { response ->
+                strictJson.parseToJsonElement(response.body.string())
+                    .jsonObject["link"]
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?: return url
+            }
             String(Base64.decode(encodedUrl, Base64.DEFAULT))
         } catch (_: Exception) {
             url
@@ -607,7 +683,11 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
 
     // region Filters & Preferences
 
-    override fun getFilterList(feed: CatalogFeed) = FilterList()
+    override fun getFilterList(feed: CatalogFeed) = if (feed == CatalogFeed.SEARCH) {
+        FilterList(ContentTypeFilter())
+    } else {
+        FilterList()
+    }
 
     override fun getSourcePreferences() = listOf(
         org.symera.source.model.SourcePreference.Select(
@@ -631,6 +711,7 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
         backdropUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" },
         genres = genres?.mapNotNull { it.name }.orEmpty(),
         contentType = ContentType.SERIES,
+        structure = ContentStructure.SEASONS,
         release = ContentRelease(year = firstAirDate?.take(4)?.toIntOrNull()),
         rating = voteAverage?.let { ContentRating(it, maximum = 10.0) },
     )
@@ -643,6 +724,7 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
         backdropUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" },
         genres = genres?.mapNotNull { it.name }.orEmpty(),
         contentType = ContentType.MOVIE,
+        structure = ContentStructure.SINGLE_ITEM,
         release = ContentRelease(year = releaseDate?.take(4)?.toIntOrNull()),
         rating = voteAverage?.let { ContentRating(it, maximum = 10.0) },
     )
@@ -659,12 +741,13 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
         "vidhide" in url || "vidhidepre" in url -> "VidHide"
         "uqload" in url -> "UqLoad"
         "vudeo" in url -> "Vudeo"
-        "bysefujedu" in url -> "Fembed"
+        "bysefujedu" in url -> "Byse"
         "primeload" in url -> "PrimeLoad"
+        "streamsb" in url || "playersb" in url -> "StreamSB"
         else -> url.substringAfter("://").substringBefore("/").substringBefore("?")
     }
 
-    private fun getLang(langId: String?): String = when (langId) {
+    private fun linkLanguage(langId: String?): String = when (langId) {
         "36" -> "[ENG]"
         "37" -> "[CAST]"
         "38" -> "[LAT]"
@@ -682,20 +765,10 @@ class Doramasflix(environment: SourceEnvironment) : Source(environment) {
 
     // endregion
 
-    // region Extractors
-
-    private val doodExtractor by lazy { DoodExtractor(client) }
-    private val voeExtractor by lazy { VoeExtractor(client, headers) }
-    private val streamTapeExtractor by lazy { StreamTapeExtractor(client) }
-    private val streamWishExtractor by lazy { StreamWishExtractor(client, headers) }
-    private val filemoonExtractor by lazy { FilemoonExtractor(client) }
-    private val universalExtractor by lazy { UniversalExtractor(client) }
-
-    // endregion
-
     companion object {
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_DEFAULT = "1080"
+        private val RETIRED_HOSTS = setOf("vudeo.co", "repro3.estrenosdoramas.us")
         private val qualityList = listOf("1080", "720", "480", "360")
     }
 }
