@@ -9,4 +9,3 @@ Currently blocked by unported libraries:
 - `animekaitheme`: requires `megaupextractor`
 - `dopeflix`: requires `dopeflixextractor`
 - `pelisplus`: requires several unported extractors
-- `yflixtheme`: requires `rapidshareextractor`
