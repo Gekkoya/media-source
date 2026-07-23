@@ -11,6 +11,10 @@ ext {
 apply plugin: "symera.plugins.extension"
 
 dependencies {
+    implementation(project(':lib:byse'))
+}
+
+dependencies {
     implementation(project(':lib:dood'))
     implementation(project(':lib:okru'))
     implementation(project(':lib:mixdrop'))
@@ -19,5 +23,7 @@ dependencies {
     implementation(project(':lib:streamtape'))
     implementation(project(':lib:voe'))
     implementation(project(':lib:vidhide'))
+    implementation(project(':lib:streamwish'))
+    implementation(project(':lib:streamsb'))
     implementation(project(':lib:universal'))
 }

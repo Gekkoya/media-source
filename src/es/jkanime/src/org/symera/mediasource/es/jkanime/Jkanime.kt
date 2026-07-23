@@ -1,9 +1,9 @@
 package org.symera.mediasource.es.jkanime
 
 import android.util.Base64
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import okhttp3.FormBody
-import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -13,12 +13,15 @@ import org.symera.mediasource.core.Source
 import org.symera.mediasource.core.bodyString
 import org.symera.mediasource.core.parseAs
 import org.symera.mediasource.es.jkanime.extractors.JkanimeExtractor
+import org.symera.mediasource.lib.byse.ByseExtractor
 import org.symera.mediasource.lib.dood.DoodExtractor
 import org.symera.mediasource.lib.filemoon.FilemoonExtractor
 import org.symera.mediasource.lib.mixdrop.MixDropExtractor
 import org.symera.mediasource.lib.mp4upload.Mp4uploadExtractor
 import org.symera.mediasource.lib.okru.OkruExtractor
+import org.symera.mediasource.lib.streamsb.StreamSbExtractor
 import org.symera.mediasource.lib.streamtape.StreamTapeExtractor
+import org.symera.mediasource.lib.streamwish.StreamWishExtractor
 import org.symera.mediasource.lib.universal.UniversalExtractor
 import org.symera.mediasource.lib.vidhide.VidHideExtractor
 import org.symera.mediasource.lib.voe.VoeExtractor
@@ -28,8 +31,10 @@ import org.symera.source.SourceCapability
 import org.symera.source.SourceEnvironment
 import org.symera.source.SymeraExtensionFactory
 import org.symera.source.model.ContentCategory
+import org.symera.source.model.ContentCredits
 import org.symera.source.model.ContentPage
 import org.symera.source.model.ContentStatus
+import org.symera.source.model.ContentStructure
 import org.symera.source.model.ContentType
 import org.symera.source.model.Filter
 import org.symera.source.model.FilterList
@@ -163,7 +168,7 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
                 title = animeDto.title,
                 description = animeDto.synopsis,
                 posterUrl = animeDto.thumbnailUrl,
-                genres = animeDto.studios?.takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
+                credits = animeDto.studios?.takeIf(String::isNotBlank)?.let { ContentCredits(studios = listOf(it)) },
                 status = animeDto.status?.let(::parseStatus),
                 contentType = animeDto.type?.let(::parseContentType),
                 categories = setOf(ContentCategory.ANIME),
@@ -207,15 +212,24 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
 
     override fun contentDetailsParse(response: Response): SContent {
         val document = response.asJsoup()
-        val metadata = document.select("div.anime__details__content div.anime_data.pc li")
+        val metadata = document.select("div.anime__details__content .anime_data li")
+        val contentType = metadata.firstOrNull { it.select("span").text().contains("Tipo", true) }
+            ?.let { parseContentType(it.text()) }
+            ?: ContentType.SERIES
         return SContent(
             url = relativeUrl(response.request.url.toString()),
             title = document.selectFirst("div.anime__details__content div.anime_info h3")?.text()?.ifBlank { null } ?: "Unknown",
             description = document.selectFirst("div.anime__details__content div.anime_info p.scroll")?.text(),
             posterUrl = document.selectFirst("div.anime__details__content div.anime_pic img")?.attr("abs:src"),
             genres = metadata.firstOrNull { it.select("span").text().contains("Generos:") }?.select("a")?.map { it.text() }.orEmpty(),
+            credits = metadata.firstOrNull { it.select("span").text().contains("Studios:") }
+                ?.select("a")
+                ?.map { it.text() }
+                ?.takeIf(List<String>::isNotEmpty)
+                ?.let { ContentCredits(studios = it) },
             status = metadata.firstOrNull { it.select("span").text().contains("Estado") }?.let { parseStatus(it.select("div").text()) },
-            contentType = ContentType.SERIES,
+            contentType = contentType,
+            structure = if (contentType == ContentType.MOVIE) ContentStructure.SINGLE_ITEM else ContentStructure.FLAT_ITEMS,
             categories = setOf(ContentCategory.ANIME),
         )
     }
@@ -224,33 +238,36 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
         val animeUrl = response.request.url.toString().trim('/')
         val pageBody = response.asJsoup()
         val token = pageBody.selectFirst("meta[name=csrf-token]")?.attr("content") ?: return emptyList()
-        val xsrfToken = response.headers("Set-Cookie")
         val formData = FormBody.Builder().add("_token", token).build()
         val animeId = pageBody.selectFirst("div.anime__details__content div.pc div#guardar-anime")
             ?.attr("data-anime")
             ?.takeIf { it.isNotBlank() } ?: return emptyList()
-
-        val cookieHeaders = headers.newBuilder().apply {
-            add("Cookie", xsrfToken.joinToString(" ") { "${it.substringBeforeLast(";")};" })
-        }.build()
+        val contentType = pageBody.select("div.anime__details__content .anime_data li")
+            .firstOrNull { it.select("span").text().contains("Tipo", true) }
+            ?.let { parseContentType(it.text()) }
+            ?: ContentType.SERIES
 
         val playableItems = buildList {
             var page = 1
             do {
-                val episodesPage = fetchAnimeEpisodes(animeId, page, cookieHeaders, formData)
-                addAll(episodesPage.data.toPlayableItemList(animeUrl))
+                val episodesPage = fetchAnimeEpisodes(animeId, page, formData)
+                addAll(episodesPage.data.toPlayableItemList(animeUrl, contentType))
                 page++
             } while (!episodesPage.nextPageUrl.isNullOrBlank() && page <= episodesPage.lastPage)
         }
         return playableItems.reversed()
     }
 
-    private fun List<EpisodeDto>.toPlayableItemList(animeUrl: String): List<SPlayableItem> = map { episode ->
+    private fun List<EpisodeDto>.toPlayableItemList(animeUrl: String, contentType: ContentType): List<SPlayableItem> = map { episode ->
         SPlayableItem(
             url = relativeUrl("$animeUrl/${episode.number}"),
-            title = "Episodio ${episode.number}",
-            type = PlayableItemType.EPISODE,
-            episodeNumber = org.symera.source.model.EpisodeNumber(episode.number),
+            title = if (contentType == ContentType.MOVIE) "Película" else "Episodio ${episode.number}",
+            type = if (contentType == ContentType.MOVIE) PlayableItemType.MOVIE else PlayableItemType.EPISODE,
+            episodeNumber = if (contentType == ContentType.MOVIE) {
+                org.symera.source.model.EpisodeNumber(1)
+            } else {
+                org.symera.source.model.EpisodeNumber(episode.number)
+            },
             airDate = episode.timestamp?.toSourceDate(),
             thumbnailUrl = episode.image?.let { img ->
                 if (img.startsWith("http://") || img.startsWith("https://")) {
@@ -262,12 +279,28 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
         )
     }
 
-    private fun fetchAnimeEpisodes(animeId: String, currentPage: Int, cookieHeaders: Headers, formData: FormBody): EpisodesPageDto = client.newCall(POST("$baseUrl/ajax/episodes/$animeId/$currentPage", headers = cookieHeaders, body = formData))
-        .execute().parseAs(json)
+    private fun fetchAnimeEpisodes(
+        animeId: String,
+        currentPage: Int,
+        formData: FormBody,
+    ): EpisodesPageDto {
+        val response = client.newCall(
+            POST("$baseUrl/ajax/episodes/$animeId/$currentPage", headers = headers, body = formData),
+        ).execute()
+        return try {
+            response.use { json.decodeFromString<EpisodesPageDto>(it.body.string()) }
+        } catch (failure: Exception) {
+            environment.logger.error(
+                "Unable to load Jkanime episodes for $animeId page $currentPage (HTTP ${response.code})",
+                failure,
+            )
+            throw failure
+        }
+    }
 
     override fun hostersParse(response: Response): List<SHoster> {
         val document = response.asJsoup()
-        return getVideoLinks(document).map { (url, lang, name) ->
+        return getVideoLinks(document).filterNot { (url) -> url.isDownloadUrl() }.map { (url, lang, name) ->
             val matched = serverMatching.firstOrNull { (_, names) -> names.any { it.lowercase() in url.lowercase() } }?.first ?: name.lowercase()
             SHoster(
                 id = url,
@@ -290,11 +323,15 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
             "voe" -> voeExtractor.streamsFromUrl(url, "$streamLang ")
             "filemoon" -> filemoonExtractor.streamsFromUrl(url, prefix = "$streamLang Filemoon:")
             "streamtape" -> streamTapeExtractor.streamsFromUrl(url, quality = "$streamLang StreamTape")
+            "streamwish" -> streamWishExtractor.streamsFromUrl(url) { "$streamLang StreamWish: $it" }
+            "streamsb" -> streamSbExtractor.streamsFromUrl(url, "$streamLang ")
             "mp4upload" -> mp4uploadExtractor.streamsFromUrl(url, prefix = "$streamLang ", headers = headers)
             "mixdrop" -> mixDropExtractor.streamsFromUrl(url, prefix = "$streamLang ")
             "doostream" -> doodExtractor.streamsFromUrl(url.replace("d-s.io", "dsvplay.com"), "$streamLang ${name.ifBlank { "Doodstream" }}")
             "vidhide" -> vidHideExtractor.streamsFromUrl(url, videoNameGen = { "$streamLang - VidHide:$it" })
-            "mediafire" -> jkanimeExtractor.getMediafireFromUrl(url, "$streamLang ")
+            "byse" -> byseExtractor.streamsFromUrl(url, streamLang).ifEmpty {
+                filemoonExtractor.streamsFromUrl(url, prefix = "$streamLang Byse:", headers = headers)
+            }
             "desuka" -> jkanimeExtractor.getDesukaFromUrl(url, "$streamLang ")
             "nozomi" -> jkanimeExtractor.getNozomiFromUrl(url, "$streamLang ")
             "desu" -> jkanimeExtractor.getDesuFromUrl(url, "$streamLang ")
@@ -334,6 +371,8 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
 
         return jsLinks + htmlLinks
     }
+
+    private fun String.isDownloadUrl(): Boolean = DOWNLOAD_HOSTS.any { host -> host in this.lowercase() }
 
     override fun List<SStream>.sortStreams(): List<SStream> {
         val preferences = environment.preferencesFor(sourcePreferenceNamespace)
@@ -420,14 +459,17 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
 
     private val okruExtractor by lazy { OkruExtractor(client) }
     private val voeExtractor by lazy { VoeExtractor(client, headers) }
-    private val filemoonExtractor by lazy { FilemoonExtractor(client) }
+    private val filemoonExtractor by lazy { FilemoonExtractor(client, environment.mediaBrowserFactory) }
     private val streamTapeExtractor by lazy { StreamTapeExtractor(client) }
     private val mp4uploadExtractor by lazy { Mp4uploadExtractor(client) }
     private val mixDropExtractor by lazy { MixDropExtractor(client) }
     private val doodExtractor by lazy { DoodExtractor(client) }
     private val vidHideExtractor by lazy { VidHideExtractor(client, headers) }
+    private val streamWishExtractor by lazy { StreamWishExtractor(client, headers) }
+    private val streamSbExtractor by lazy { StreamSbExtractor(client, headers, json) }
+    private val byseExtractor by lazy { ByseExtractor(client, headers) }
     private val jkanimeExtractor by lazy { JkanimeExtractor(client) }
-    private val universalExtractor by lazy { UniversalExtractor(client) }
+    private val universalExtractor by lazy { UniversalExtractor(client, environment.mediaBrowserFactory) }
 
     companion object {
         private const val CDN_THUMBNAIL_BASE = "https://cdn.jkdesa.com/assets/images/animes/video/image_thumb/"
@@ -451,13 +493,21 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
             "Streamwish",
             "DoodStream",
             "VidHide",
-            "Mediafire",
             "Desuka",
             "Nozomi",
             "Desu",
             "Magi",
         )
         private val PREF_SERVER_DEFAULT = SERVER_LIST.first()
+
+        private val DOWNLOAD_HOSTS = listOf(
+            "mediafire.com",
+            "mega.nz",
+            "drive.google.com",
+            "1fichier.com",
+            "pixeldrain.com",
+            "gofile.io",
+        )
 
         private val animePagePattern by lazy {
             Regex(
@@ -478,6 +528,7 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
             "nozomi" to listOf("jkplayer/um2?", "um2.php", "nozomi"),
             "desu" to listOf("jkplayer/um?", "um.php"),
             "magi" to listOf("jkplayer/umv?"),
+            "byse" to listOf("bysekoze", "bysefujedu"),
             "mega" to listOf("mega.nz"),
         )
     }

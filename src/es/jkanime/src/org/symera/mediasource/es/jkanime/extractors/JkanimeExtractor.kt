@@ -60,7 +60,7 @@ class JkanimeExtractor(private val client: OkHttpClient) {
     }
 
     fun getMagiFromUrl(url: String, prefix: String = ""): List<SStream> {
-        val document = client.newCall(GET(url)).execute().asJsoup()
+        val document = client.newCall(GET(url, Headers.headersOf("Referer", "https://jkanime.net/"))).execute().asJsoup()
         val videoUrl = document.selectFirst("""source[src*=".m3u8"]""")?.attr("abs:src") ?: return emptyList()
         return listOf(
             PlayableStream(
