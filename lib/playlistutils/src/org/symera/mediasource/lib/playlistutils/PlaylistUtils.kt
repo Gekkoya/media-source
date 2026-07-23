@@ -10,6 +10,7 @@ import org.symera.mediasource.core.commonEmptyHeaders
 import org.symera.mediasource.core.parallelMapNotNullBlocking
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.source.model.AudioTrack
+import org.symera.source.model.HeaderScope
 import org.symera.source.model.HttpHeader
 import org.symera.source.model.MediaRequest
 import org.symera.source.model.PlayableStream
@@ -62,7 +63,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
                 PlayableStream(
                     id = playlistUrl,
                     title = videoNameGen("Video"),
-                    request = MediaRequest(uri = playlistUrl, headers = masterHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }),
+                    request = MediaRequest(uri = playlistUrl, headers = masterHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }, headerScope = HeaderScope.ALL_DERIVED_REQUESTS),
                     subtitleTracks = subtitleList,
                     audioTracks = audioList,
                 ),
@@ -113,6 +114,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
                 request = MediaRequest(
                     uri = videoUrl,
                     headers = videoHeadersGen(headers, referer, videoUrl).toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } },
+                    headerScope = HeaderScope.ALL_DERIVED_REQUESTS,
                 ),
                 hints = StreamHints(
                     height = QUALITY_REGEX.find(resolution.orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull(),
@@ -206,6 +208,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
                 request = MediaRequest(
                     uri = videoUrl,
                     headers = videoHeadersGen(headers, referer, videoUrl).toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } },
+                    headerScope = HeaderScope.ALL_DERIVED_REQUESTS,
                 ),
                 hints = StreamHints(
                     height = videoSrc.attr("height").toIntOrNull(),

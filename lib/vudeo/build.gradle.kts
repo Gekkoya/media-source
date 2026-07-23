@@ -1,3 +1,7 @@
 plugins {
-    id("symera.plugins.library")
+    alias(symera.plugins.library)
+}
+
+dependencies {
+    implementation(projects.lib.webview)
 }

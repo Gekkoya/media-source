@@ -4,4 +4,5 @@ plugins {
 
 dependencies {
     implementation(projects.lib.playlistutils)
+    implementation(projects.lib.webview)
 }
