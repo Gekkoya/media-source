@@ -1,17 +1,12 @@
-@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-
 package org.symera.mediasource.core
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.okio.decodeFromBufferedSource
 import kotlinx.serialization.serializer
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import okio.buffer
-import okio.source
 import java.io.InputStream
 
 val mediaSourceJson: Json = Json {
@@ -29,7 +24,7 @@ inline fun <reified T> String.parseAs(json: Json = mediaSourceJson): T = json.de
 inline fun <reified T> String.parseAs(json: Json = mediaSourceJson, transform: (String) -> String): T = transform(this).parseAs(json)
 
 inline fun <reified T> Response.parseAs(json: Json = mediaSourceJson): T = use {
-    json.decodeFromBufferedSource(serializer(), it.body.source())
+    json.decodeFromString(serializer(), it.body.string())
 }
 
 inline fun <reified T> Response.parseAs(json: Json = mediaSourceJson, transform: (String) -> String): T = use {
@@ -39,7 +34,7 @@ inline fun <reified T> Response.parseAs(json: Json = mediaSourceJson, transform:
 inline fun <reified T> JsonElement.parseAs(json: Json = mediaSourceJson): T = json.decodeFromJsonElement(serializer(), this)
 
 inline fun <reified T> InputStream.parseAs(json: Json = mediaSourceJson): T = use {
-    json.decodeFromBufferedSource(serializer(), it.source().buffer())
+    json.decodeFromString(serializer(), readBytes().decodeToString())
 }
 
 inline fun <reified T> T.toJsonString(json: Json = mediaSourceJson): String = json.encodeToString(serializer(), this)
