@@ -1,14 +1,20 @@
 package org.symera.mediasource.multisrc.pelisplus
 
+import android.util.Log
 import kotlinx.serialization.json.Json
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.burstcloud.BurstCloudExtractor
+import org.symera.mediasource.lib.byse.ByseExtractor
 import org.symera.mediasource.lib.dood.DoodExtractor
+import org.symera.mediasource.lib.emturbo.EmTurboExtractor
 import org.symera.mediasource.lib.fastream.FastreamExtractor
 import org.symera.mediasource.lib.filemoon.FilemoonExtractor
+import org.symera.mediasource.lib.lulu.LuluExtractor
+import org.symera.mediasource.lib.mixdrop.MixDropExtractor
 import org.symera.mediasource.lib.mp4upload.Mp4uploadExtractor
 import org.symera.mediasource.lib.okru.OkruExtractor
 import org.symera.mediasource.lib.streamlare.StreamlareExtractor
+import org.symera.mediasource.lib.streamsb.StreamSbExtractor
 import org.symera.mediasource.lib.streamsilk.StreamSilkExtractor
 import org.symera.mediasource.lib.streamtape.StreamTapeExtractor
 import org.symera.mediasource.lib.streamwish.StreamWishExtractor
@@ -46,7 +52,8 @@ abstract class PelisPlus(
 
     private val voeExtractor by lazy { VoeExtractor(client, headers) }
     private val okruExtractor by lazy { OkruExtractor(client) }
-    private val filemoonExtractor by lazy { FilemoonExtractor(client) }
+    private val filemoonExtractor by lazy { FilemoonExtractor(client, environment.mediaBrowserFactory) }
+    private val mixDropExtractor by lazy { MixDropExtractor(client) }
     private val uqloadExtractor by lazy { UqloadExtractor(client) }
     private val mp4uploadExtractor by lazy { Mp4uploadExtractor(client) }
     private val streamWishExtractor by lazy { StreamWishExtractor(client, headers) }
@@ -60,7 +67,11 @@ abstract class PelisPlus(
     private val vidHideExtractor by lazy { VidHideExtractor(client, headers) }
     private val streamSilkExtractor by lazy { StreamSilkExtractor(client) }
     private val vidGuardExtractor by lazy { VidGuardExtractor(client) }
-    private val universalExtractor by lazy { UniversalExtractor(client) }
+    private val byseExtractor by lazy { ByseExtractor(client, headers, json) }
+    private val emTurboExtractor by lazy { EmTurboExtractor(client, headers) }
+    private val luluExtractor by lazy { LuluExtractor(client, headers) }
+    private val universalExtractor by lazy { UniversalExtractor(client, environment.mediaBrowserFactory) }
+    private val streamSbExtractor by lazy { StreamSbExtractor(client, headers) }
 
     /**
      * Keep this sequential in callers when UniversalExtractor is possible; it may need WebView.
@@ -68,10 +79,11 @@ abstract class PelisPlus(
     protected suspend fun serverStreamResolver(url: String, prefix: String = "", serverName: String? = ""): List<SStream> {
         val source = serverName?.ifEmpty { url } ?: url
         val matched = conventions.firstOrNull { (_, names) -> names.any { it.lowercase() in source.lowercase() } }?.first
-        return when (matched) {
+        val streams = when (matched) {
             "voe" -> voeExtractor.streamsFromUrl(url, "$prefix ")
             "okru" -> okruExtractor.streamsFromUrl(url, prefix)
             "filemoon" -> filemoonExtractor.streamsFromUrl(url, prefix = "$prefix Filemoon:")
+            "mixdrop" -> mixDropExtractor.streamsFromUrl(url, prefix = "$prefix ")
             "amazon" -> amazonStreamsFromUrl(url, prefix)
             "uqload" -> uqloadExtractor.streamsFromUrl(url, "$prefix ")
             "mp4upload" -> mp4uploadExtractor.streamsFromUrl(url, headers, prefix = "$prefix ")
@@ -86,8 +98,19 @@ abstract class PelisPlus(
             "streamtape" -> streamTapeExtractor.streamsFromUrl(url, quality = "$prefix StreamTape")
             "vidhide" -> vidHideExtractor.streamsFromUrl(url) { "$prefix - VidHide:$it" }
             "vidguard" -> vidGuardExtractor.streamsFromUrl(url, prefix = "$prefix ")
+            "byse" -> byseExtractor.streamsFromUrl(url, prefix).ifEmpty {
+                // Byse playback API now requires browser fingerprint attestation.
+                // Reuse real WebView networking as fallback, preserving its cookies and headers.
+                val embedUrl = byseExtractor.embedUrlFromUrl(url) ?: url
+                universalExtractor.streamsFromUrl(embedUrl, headers, prefix = "$prefix Byse:")
+            }
+            "emturbo" -> emTurboExtractor.streamsFromUrl(url, prefix)
+            "lulu" -> luluExtractor.streamsFromUrl(url, prefix)
+            "streamsb" -> streamSbExtractor.streamsFromUrl(url, prefix)
             else -> universalExtractor.streamsFromUrl(url, headers, prefix = "$prefix ")
         }
+        Log.d("SymeraHoster", "route=$matched name=$serverName host=${url.substringAfter("://").substringBefore("/")} streams=${streams.size}")
+        return streams
     }
 
     protected suspend fun serverVideoResolver(url: String, prefix: String = "", serverName: String? = ""): List<SStream> = serverStreamResolver(url, prefix, serverName)
@@ -186,6 +209,7 @@ abstract class PelisPlus(
             "voe" to listOf("voe", "tubelessceliolymph", "simpulumlamerop", "urochsunloath", "nathanfromsubject", "yip.", "metagnathtuggers", "donaldlineelse"),
             "okru" to listOf("ok.ru", "okru"),
             "filemoon" to listOf("filemoon", "moonplayer", "moviesm4u", "files.im"),
+            "mixdrop" to listOf("mixdrop", "mixdroop", "mxdrop"),
             "amazon" to listOf("amazon", "amz"),
             "uqload" to listOf("uqload"),
             "mp4upload" to listOf("mp4upload"),
@@ -200,6 +224,11 @@ abstract class PelisPlus(
             "streamtape" to listOf("streamtape", "stp", "stape", "shavetape"),
             "vidhide" to listOf("ahvsh", "streamhide", "guccihide", "streamvid", "vidhide", "kinoger", "smoothpre", "dhtpre", "peytonepre", "earnvids", "ryderjet"),
             "vidguard" to listOf("vembed", "guard", "listeamed", "bembed", "vgfplay"),
+            "byse" to listOf("byse", "bysekoze", "bysefujedu"),
+            "emturbo" to listOf("emturbo", "emturbovid", "lvturbo", "sblanh"),
+            "lulu" to listOf("lulu", "luluvdo"),
+            "streamsb" to listOf("streamsb", "playersb", "sbplay", "streamssb"),
+            "universal" to listOf("primeload", "waaw", "rpmstream", "pelisplus.rpmstream"),
         )
     }
 }

@@ -23,5 +23,9 @@ dependencies {
     api(project(":lib:vidhide"))
     api(project(":lib:streamsilk"))
     api(project(":lib:vidguard"))
+    api(project(":lib:byse"))
+    api(project(":lib:emturbo"))
+    api(project(":lib:lulu"))
+    api(project(":lib:streamsb"))
     api(project(":lib:universal"))
 }
