@@ -6,6 +6,8 @@ import org.symera.mediasource.core.commonEmptyHeaders
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
 import org.symera.source.model.MediaRequest
+import org.symera.source.model.HeaderScope
+import org.symera.source.model.HttpHeader
 import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
@@ -14,32 +16,46 @@ class OkruExtractor(private val client: OkHttpClient, private val headers: Heade
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
 
     fun streamsFromUrl(url: String, prefix: String = "", fixQualities: Boolean = true): List<SStream> {
-        val sourceUrl = url.toHttpsUrl()
+        val sourceUrl = normalizeHttpsUrl(url)
         val document = client.newCall(GET(sourceUrl, headers)).execute().useAsJsoup()
         val videoString = document.selectFirst("div[data-options]")?.attr("data-options") ?: return emptyList()
 
+        val options = parseOptions(videoString)
         return when {
-            "ondemandHls" in videoString -> {
-                val playlistUrl = videoString.extractLink("ondemandHls").toHttpsUrl()
-                playlistUtils.extractFromHls(
-                    playlistUrl,
-                    referer = sourceUrl,
-                    masterHeaders = headers.withReferer(sourceUrl),
-                    videoHeaders = headers.withReferer(sourceUrl),
-                    videoNameGen = { "Okru:$it".addPrefix(prefix) },
-                )
+            options.hlsUrl != null -> {
+                val playlistUrl = normalizeHttpsUrl(options.hlsUrl)
+                playlistUtils.withDirectHlsFallback(
+                    playlistUrl = playlistUrl,
+                    title = "Okru:HLS".addPrefix(prefix),
+                    headers = headers.withReferer(sourceUrl),
+                ) {
+                    playlistUtils.extractFromHls(
+                        playlistUrl,
+                        referer = sourceUrl,
+                        masterHeaders = headers.withReferer(sourceUrl),
+                        videoHeaders = headers.withReferer(sourceUrl),
+                        videoNameGen = { "Okru:$it".addPrefix(prefix) },
+                    )
+                }
             }
-            "ondemandDash" in videoString -> {
-                val playlistUrl = videoString.extractLink("ondemandDash").toHttpsUrl()
-                playlistUtils.extractFromDash(
-                    playlistUrl,
-                    videoNameGen = { "Okru:$it".addPrefix(prefix) },
-                    mpdHeaders = headers.withReferer(url),
-                    videoHeaders = headers.withReferer(url),
-                    referer = sourceUrl,
-                )
+            options.dashUrl != null -> {
+                val playlistUrl = normalizeHttpsUrl(options.dashUrl)
+                val dashHeaders = headers.withReferer(sourceUrl)
+                playlistUtils.withDirectHlsFallback(
+                    playlistUrl = playlistUrl,
+                    title = "Okru:DASH".addPrefix(prefix),
+                    headers = dashHeaders,
+                ) {
+                    playlistUtils.extractFromDash(
+                        playlistUrl,
+                        videoNameGen = { "Okru:$it".addPrefix(prefix) },
+                        mpdHeaders = dashHeaders,
+                        videoHeaders = dashHeaders,
+                        referer = sourceUrl,
+                    )
+                }
             }
-            else -> streamsFromJson(videoString, prefix, fixQualities)
+            else -> parseVideos(videoString, prefix, fixQualities, headers.withReferer(sourceUrl))
         }
     }
 
@@ -50,39 +66,41 @@ class OkruExtractor(private val client: OkHttpClient, private val headers: Heade
         .set("User-Agent", USER_AGENT)
         .build()
 
-    private fun String.extractLink(attr: String) = substringAfter("$attr\\\":\\\"").substringBefore("\\\"").replace("\\\\u0026", "&")
+    internal data class ParsedOptions(val hlsUrl: String?, val dashUrl: String?)
 
-    private fun String.toHttpsUrl(): String = replaceFirst("^http://".toRegex(), "https://")
+    internal companion object {
+        fun parseOptions(videoString: String): ParsedOptions {
+            val normalized = videoString.replace("\\\"", "\"").replace("\\\\u0026", "&").replace("\\u0026", "&")
+            fun link(name: String) = Regex("""[\"']$name[\"']\s*:\s*[\"']([^\"']+)[\"']""").find(normalized)?.groupValues?.get(1)
+            return ParsedOptions(link("ondemandHls"), link("ondemandDash"))
+        }
 
-    private fun streamsFromJson(videoString: String, prefix: String = "", fixQualities: Boolean = true): List<SStream> {
-        val normalized = videoString.replace("\\\"", "\"").replace("\\u0026", "&")
-        val videoRegex = Regex("""[\"']name[\"']\s*:\s*[\"']([^\"']+)[\"']\s*,\s*[\"']url[\"']\s*:\s*[\"']([^\"']+)[\"']""")
-
-        return videoRegex.findAll(normalized).mapNotNull { match ->
-            val quality = match.groupValues[1].let { if (fixQualities) fixQuality(it) else it }
-            val streamTitle = "Okru:$quality".addPrefix(prefix)
-            val videoUrl = match.groupValues[2]
-            if (videoUrl.startsWith("https://")) {
-                PlayableStream(id = videoUrl, title = streamTitle, request = MediaRequest(uri = videoUrl))
-            } else {
-                null
-            }
-        }.toList()
+        fun parseVideos(videoString: String, prefix: String = "", fixQualities: Boolean = true, referer: String? = null): List<PlayableStream> =
+            parseVideos(videoString, prefix, fixQualities, referer?.let { Headers.headersOf("Referer", it) } ?: Headers.EMPTY)
     }
 
-    private fun fixQuality(quality: String): String {
-        val qualities = listOf(
-            "ultra" to "2160p",
-            "quad" to "1440p",
-            "full" to "1080p",
-            "hd" to "720p",
-            "sd" to "480p",
-            "low" to "360p",
-            "lowest" to "240p",
-            "mobile" to "144p",
-        )
-        return qualities.find { it.first == quality }?.second ?: quality
-    }
 }
 
+private fun normalizeHttpsUrl(url: String): String = url.replaceFirst("^http://".toRegex(), "https://")
+
 private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+
+private fun parseVideos(videoString: String, prefix: String, fixQualities: Boolean, requestHeaders: Headers): List<PlayableStream> {
+    val normalized = videoString.replace("\\\"", "\"").replace("\\u0026", "&")
+    val videoRegex = Regex("""[\"']name[\"']\s*:\s*[\"']([^\"']+)[\"']\s*,\s*[\"']url[\"']\s*:\s*[\"']([^\"']+)[\"']""")
+    val qualities = mapOf("ultra" to "2160p", "quad" to "1440p", "full" to "1080p", "hd" to "720p", "sd" to "480p", "low" to "360p", "lowest" to "240p", "mobile" to "144p")
+    return videoRegex.findAll(normalized).mapNotNull { match ->
+        val quality = match.groupValues[1].let { if (fixQualities) qualities[it] ?: it else it }
+        val videoUrl = match.groupValues[2]
+        if (!videoUrl.startsWith("https://")) return@mapNotNull null
+        PlayableStream(
+            id = videoUrl,
+            title = listOf(prefix.takeIf(String::isNotBlank), "Okru:$quality").filterNotNull().joinToString(" "),
+            request = MediaRequest(
+                uri = videoUrl,
+                headers = requestHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } },
+                headerScope = HeaderScope.ALL_DERIVED_REQUESTS,
+            ),
+        )
+    }.toList()
+}
