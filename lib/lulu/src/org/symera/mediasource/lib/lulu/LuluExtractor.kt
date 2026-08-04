@@ -2,11 +2,14 @@ package org.symera.mediasource.lib.lulu
 
 import android.util.Log
 import okhttp3.Headers
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
+import org.symera.mediasource.lib.unpacker.autoUnpacker
 import org.symera.source.model.SStream
 import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
+import kotlin.coroutines.cancellation.CancellationException
 
 class LuluExtractor(
     private val client: OkHttpClient,
@@ -18,50 +21,55 @@ class LuluExtractor(
         .add("Origin", "https://luluvdo.com")
         .build()
 
-    suspend fun streamsFromUrl(url: String, prefix: String = ""): List<SStream> = runCatching {
+    suspend fun streamsFromUrl(url: String, prefix: String = ""): List<SStream> = try {
         val html = client.awaitSuccess(GET(url, requestHeaders)).use { it.body.string() }
-        val script = html.substringAfter("eval(function(p,a,c,k,e,d)", "")
-        val unpacked = unpack(script)
-        val hlsUrl = SOURCE_REGEX.find(unpacked)?.groupValues?.get(1)
-            ?: SOURCE_REGEX.find(html)?.groupValues?.get(1)
-            ?: return emptyList()
-        playlistUtils.extractFromHls(hlsUrl.replace("\\/", "/"), url) { quality -> "$prefix Lulu: $quality" }
-    }.onFailure { error ->
-        Log.w("LuluExtractor", "Failed url=$url message=${error.message}")
-    }.getOrDefault(emptyList())
-
-    private fun unpack(script: String): String {
-        val match = PACKED_REGEX.find(script) ?: return script
-        val packed = match.groupValues[1]
-        val radix = match.groupValues[2].toInt()
-        val count = match.groupValues[3].toInt()
-        val words = match.groupValues[4].split("|")
-        var result = packed
-        for (index in (count - 1) downTo 0) {
-            val word = words.getOrNull(index).orEmpty()
-            if (word.isNotEmpty()) result = result.replace("\\b${toRadix(index, radix)}\\b".toRegex(), word)
-        }
-        return result.replace("\\'", "'").replace("\\/", "/")
+        val hlsUrl = extractSource(html) ?: return emptyList()
+        playlistUtils.extractFromHls(
+            hlsUrl,
+            referer = "https://luluvdo.com/",
+            masterHeaders = requestHeaders,
+            videoHeaders = requestHeaders,
+        ) { quality -> "$prefix Lulu: $quality" }
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Exception) {
+        Log.w("LuluExtractor", "Failed url=$url message=${error.message}", error)
+        emptyList()
     }
 
-    private fun toRadix(value: Int, radix: Int): String {
-        val chars = "0123456789abcdefghijklmnopqrstuvwxyz"
-        if (value == 0) return "0"
-        var current = value
-        return buildString {
-            while (current > 0) {
-                val remainder = current % radix
-                insert(0, chars[remainder])
-                current /= radix
+    internal companion object {
+        val SOURCE_REGEX = Regex("""sources\s*:\s*\[\s*\{\s*file\s*:\s*[\"']([^\"']+)[\"']""")
+
+        fun extractSource(html: String, unpacker: (String) -> String? = ::autoUnpacker): String? {
+            val page = if (html.contains("eval(function(p,a,c,k,e")) unpacker(html) ?: return null else html
+            val source = SOURCE_REGEX.find(page)?.groupValues?.get(1)?.replace("\\/", "/") ?: return null
+            val parsed = source.toHttpUrlOrNull() ?: return null
+            if (!parsed.toString().contains(".m3u8", ignoreCase = true)) return null
+
+            val query = source.substringAfter('?', "")
+            val positional = mutableMapOf<String, String>()
+            val named = linkedMapOf<String, String>()
+            var position = 0
+            query.split('&').filter(String::isNotEmpty).forEach { part ->
+                val pieces = part.split('=', limit = 2)
+                val key = pieces.first()
+                val value = pieces.getOrElse(1) { "" }
+                if (key.isBlank()) {
+                    POSITIONAL_KEYS.getOrNull(position++)?.let { positional[it] = value }
+                } else {
+                    named[key] = value
+                }
             }
+            val builder = source.substringBefore('?').toHttpUrlOrNull()?.newBuilder() ?: return null
+            builder.apply {
+                POSITIONAL_KEYS.forEach { key -> positional[key]?.let { addQueryParameter(key, it) } }
+                named.filterKeys { it != "i" && it != "sp" }.forEach { (key, value) -> addQueryParameter(key, value) }
+                addQueryParameter("i", "0.3")
+                addQueryParameter("sp", "0")
+            }
+            return builder.build().toString()
         }
-    }
 
-    private companion object {
-        val PACKED_REGEX = Regex(
-            """\}\('(.+?)',(\d+),(\d+),'(.*?)'\.split\('\|'\)\)\)""",
-            setOf(RegexOption.DOT_MATCHES_ALL),
-        )
-        val SOURCE_REGEX = Regex("""(?:file|url)\s*:\s*[\"']([^\"']+\.m3u8[^\"']*)[\"']""")
+        private val POSITIONAL_KEYS = listOf("t", "s", "e", "f")
     }
 }
