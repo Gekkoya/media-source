@@ -21,6 +21,7 @@ import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import java.io.File
 import kotlin.math.abs
+import kotlin.coroutines.cancellation.CancellationException
 
 class PlaylistUtils(private val client: OkHttpClient, private val headers: Headers = commonEmptyHeaders) {
     fun extractFromHls(
@@ -59,15 +60,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         val masterPlaylist = client.newCall(GET(playlistUrl, masterHeaders)).execute().bodyString()
 
         if (PLAYLIST_SEPARATOR !in masterPlaylist) {
-            return listOf(
-                PlayableStream(
-                    id = playlistUrl,
-                    title = videoNameGen("Video"),
-                    request = MediaRequest(uri = playlistUrl, headers = masterHeaders.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } }, headerScope = HeaderScope.ALL_DERIVED_REQUESTS),
-                    subtitleTracks = subtitleList,
-                    audioTracks = audioList,
-                ),
-            )
+            return listOf(directHlsFallback(playlistUrl, videoNameGen("Video"), masterHeaders, subtitleList, audioList))
         }
 
         val subtitleTracks = subtitleList + SUBTITLE_REGEX.findAll(masterPlaylist).mapNotNull {
@@ -126,6 +119,39 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         }
             .sortedByDescending { (bandwidth, _) -> bandwidth ?: 0L }
             .map { (_, video) -> video }
+    }
+
+    fun directHlsFallback(
+        playlistUrl: String,
+        title: String,
+        headers: Headers,
+        subtitleList: List<SubtitleTrack> = emptyList(),
+        audioList: List<AudioTrack> = emptyList(),
+    ): PlayableStream = PlayableStream(
+        id = playlistUrl,
+        title = title,
+        request = MediaRequest(
+            uri = playlistUrl,
+            headers = headers.toMultimap().flatMap { (name, values) -> values.map { HttpHeader(name, it) } },
+            headerScope = HeaderScope.ALL_DERIVED_REQUESTS,
+        ),
+        subtitleTracks = subtitleList,
+        audioTracks = audioList,
+    )
+
+    fun withDirectHlsFallback(
+        playlistUrl: String,
+        title: String,
+        headers: Headers,
+        subtitleList: List<SubtitleTrack> = emptyList(),
+        audioList: List<AudioTrack> = emptyList(),
+        inspect: () -> List<SStream>,
+    ): List<SStream> = try {
+        inspect()
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (_: Exception) {
+        listOf(directHlsFallback(playlistUrl, title, headers, subtitleList, audioList))
     }
 
     fun generateMasterHeaders(baseHeaders: Headers, referer: String): Headers = baseHeaders.newBuilder().apply {
@@ -248,13 +274,17 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
     }
 
     fun fixSubtitles(subtitleList: List<SubtitleTrack>): List<SubtitleTrack> = subtitleList.parallelMapNotNullBlocking {
-        runCatching {
+        try {
             val subData = client.awaitSuccess(GET(it.request.uri)).bodyString()
             val file = File.createTempFile("subs", "vtt").also(File::deleteOnExit)
             file.writeText(FIX_SUBTITLE_REGEX.replace(subData, ::cleanSubtitleData))
             val uri = Uri.fromFile(file)
             SubtitleTrack(id = uri.toString(), request = MediaRequest(uri = uri.toString()), language = it.language, label = it.label)
-        }.getOrNull()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            null
+        }
     }
 
     companion object {
