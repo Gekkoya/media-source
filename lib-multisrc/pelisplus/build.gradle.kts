@@ -28,4 +28,14 @@ dependencies {
     api(project(":lib:lulu"))
     api(project(":lib:streamsb"))
     api(project(":lib:universal"))
+    testImplementation(libs.bundles.common)
+    testImplementation(libs.junit)
+}
+
+android {
+    sourceSets {
+        named("test") {
+            java.srcDir("test")
+        }
+    }
 }

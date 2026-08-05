@@ -2,6 +2,7 @@ package org.symera.mediasource.multisrc.pelisplus
 
 import android.util.Log
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.burstcloud.BurstCloudExtractor
 import org.symera.mediasource.lib.byse.ByseExtractor
@@ -24,6 +25,7 @@ import org.symera.mediasource.lib.uqload.UqloadExtractor
 import org.symera.mediasource.lib.vidguard.VidGuardExtractor
 import org.symera.mediasource.lib.vidhide.VidHideExtractor
 import org.symera.mediasource.lib.voe.VoeExtractor
+import org.symera.mediasource.lib.vudeo.VudeoExtractor
 import org.symera.mediasource.lib.yourupload.YourUploadExtractor
 import org.symera.source.ConfigurableSymeraSource
 import org.symera.source.SourceEnvironment
@@ -35,6 +37,7 @@ import org.symera.source.model.SourcePreference
 import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import org.symera.source.online.SymeraHttpSource
+import kotlin.coroutines.cancellation.CancellationException
 
 abstract class PelisPlus(
     environment: SourceEnvironment,
@@ -51,10 +54,11 @@ abstract class PelisPlus(
     }
 
     private val voeExtractor by lazy { VoeExtractor(client, headers) }
-    private val okruExtractor by lazy { OkruExtractor(client) }
+    private val okruExtractor by lazy { OkruExtractor(client, headers) }
     private val filemoonExtractor by lazy { FilemoonExtractor(client, environment.mediaBrowserFactory) }
     private val mixDropExtractor by lazy { MixDropExtractor(client) }
     private val uqloadExtractor by lazy { UqloadExtractor(client) }
+    private val vudeoExtractor by lazy { VudeoExtractor(client, headers) }
     private val mp4uploadExtractor by lazy { Mp4uploadExtractor(client) }
     private val streamWishExtractor by lazy { StreamWishExtractor(client, headers) }
     private val doodExtractor by lazy { DoodExtractor(client) }
@@ -78,14 +82,24 @@ abstract class PelisPlus(
      */
     protected suspend fun serverStreamResolver(url: String, prefix: String = "", serverName: String? = ""): List<SStream> {
         val source = serverName?.ifEmpty { url } ?: url
-        val matched = conventions.firstOrNull { (_, names) -> names.any { it.lowercase() in source.lowercase() } }?.first
+        val matched = routeKey(source)
         val streams = when (matched) {
             "voe" -> voeExtractor.streamsFromUrl(url, "$prefix ")
-            "okru" -> okruExtractor.streamsFromUrl(url, prefix)
+            "okru" -> resolveHttpThenBrowser(
+                http = { okruExtractor.streamsFromUrl(url, prefix) },
+                browser = { browserStreams(url, prefix) },
+            )
             "filemoon" -> filemoonExtractor.streamsFromUrl(url, prefix = "$prefix Filemoon:")
-            "mixdrop" -> mixDropExtractor.streamsFromUrl(url, prefix = "$prefix ")
+            "mixdrop" -> resolveHttpThenBrowser(
+                http = { mixDropExtractor.streamsFromUrl(url, prefix = "$prefix ") },
+                browser = { browserStreams(url, prefix) },
+            )
             "amazon" -> amazonStreamsFromUrl(url, prefix)
             "uqload" -> uqloadExtractor.streamsFromUrl(url, "$prefix ")
+            "vudeo" -> resolveVudeoStreams(
+                http = { vudeoExtractor.streamsFromUrl(url, "$prefix ") },
+                browser = { browserStreams(url, "$prefix ") },
+            )
             "mp4upload" -> mp4uploadExtractor.streamsFromUrl(url, headers, prefix = "$prefix ")
             "streamwish" -> streamWishExtractor.streamsFromUrl(url) { "$prefix StreamWish:$it" }
             "doodstream" -> doodExtractor.streamsFromUrl(url, "$prefix DoodStream")
@@ -102,16 +116,28 @@ abstract class PelisPlus(
                 // Byse playback API now requires browser fingerprint attestation.
                 // Reuse real WebView networking as fallback, preserving its cookies and headers.
                 val embedUrl = byseExtractor.embedUrlFromUrl(url) ?: url
-                universalExtractor.streamsFromUrl(embedUrl, headers, prefix = "$prefix Byse:")
+                browserStreams(embedUrl, "$prefix Byse:")
             }
             "emturbo" -> emTurboExtractor.streamsFromUrl(url, prefix)
             "lulu" -> luluExtractor.streamsFromUrl(url, prefix)
             "streamsb" -> streamSbExtractor.streamsFromUrl(url, prefix)
-            else -> universalExtractor.streamsFromUrl(url, headers, prefix = "$prefix ")
+            else -> browserStreams(url, "$prefix ")
         }
         Log.d("SymeraHoster", "route=$matched name=$serverName host=${url.substringAfter("://").substringBefore("/")} streams=${streams.size}")
         return streams
     }
+
+    private suspend fun browserStreams(url: String, prefix: String): List<SStream> = universalExtractor.streamsFromUrl(
+        origRequestUrl = url,
+        origRequestHeader = headers,
+        prefix = prefix,
+        allowedTopLevelHosts = browserAllowedTopLevelHosts(url),
+    )
+
+    private fun browserAllowedTopLevelHosts(url: String): Set<String> = setOf(
+        baseUrl.toHttpUrl().host,
+        url.toHttpUrl().host,
+    )
 
     protected suspend fun serverVideoResolver(url: String, prefix: String = "", serverName: String? = ""): List<SStream> = serverStreamResolver(url, prefix, serverName)
 
@@ -212,8 +238,9 @@ abstract class PelisPlus(
             "mixdrop" to listOf("mixdrop", "mixdroop", "mxdrop"),
             "amazon" to listOf("amazon", "amz"),
             "uqload" to listOf("uqload"),
+            "vudeo" to listOf("vudeo", "vudea"),
             "mp4upload" to listOf("mp4upload"),
-            "streamwish" to listOf("wishembed", "streamwish", "strwish", "wish", "Kswplayer", "Swhoi", "Multimovies", "Uqloads", "neko-stream", "swdyu", "iplayerhls", "streamgg"),
+            "streamwish" to listOf("wishembed", "streamwish", "flaswish", "strwish", "wish", "Kswplayer", "Swhoi", "Multimovies", "Uqloads", "neko-stream", "swdyu", "iplayerhls", "streamgg"),
             "doodstream" to listOf("doodstream", "dood.", "ds2play", "doods.", "ds2video", "dooood", "d000d", "d0000d"),
             "streamlare" to listOf("streamlare", "slmaxed"),
             "yourupload" to listOf("yourupload", "upload"),
@@ -228,7 +255,30 @@ abstract class PelisPlus(
             "emturbo" to listOf("emturbo", "emturbovid", "lvturbo", "sblanh"),
             "lulu" to listOf("lulu", "luluvdo"),
             "streamsb" to listOf("streamsb", "playersb", "sbplay", "streamssb"),
-            "universal" to listOf("primeload", "waaw", "rpmstream", "pelisplus.rpmstream"),
+            "universal" to listOf("pelisplus-cdn", "primeload", "waaw", "rpmstream", "pelisplus.rpmstream"),
         )
+
+        fun routeKey(source: String): String? = conventions.firstOrNull { (_, names) ->
+            names.any { it.lowercase() in source.lowercase() }
+        }?.first
+
+        internal suspend fun resolveVudeoStreams(
+            http: suspend () -> List<SStream>,
+            browser: suspend () -> List<SStream>,
+        ): List<SStream> {
+            val httpStreams = try {
+                http()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                emptyList()
+            }
+            return httpStreams.ifEmpty { browser() }
+        }
+
+        internal suspend fun resolveHttpThenBrowser(
+            http: suspend () -> List<SStream>,
+            browser: suspend () -> List<SStream>,
+        ): List<SStream> = resolveVudeoStreams(http, browser)
     }
 }
