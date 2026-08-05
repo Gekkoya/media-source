@@ -301,7 +301,7 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
     override fun hostersParse(response: Response): List<SHoster> {
         val document = response.asJsoup()
         return getVideoLinks(document).filterNot { (url) -> url.isDownloadUrl() }.map { (url, lang, name) ->
-            val matched = serverMatching.firstOrNull { (_, names) -> names.any { it.lowercase() in url.lowercase() } }?.first ?: name.lowercase()
+            val matched = JkanimeRouting.match(url, name.lowercase())
             SHoster(
                 id = url,
                 name = listOf(lang, name.ifBlank { matched }).filter { it.isNotBlank() }.joinToString(" "),
@@ -516,21 +516,6 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
             )
         }
 
-        private val serverMatching = listOf(
-            "voe" to listOf("voe", "tubelessceliolymph", "simpulumlamerop", "urochsunloath", "nathanfromsubject", "yip.", "metagnathtuggers", "donaldlineelse"),
-            "okru" to listOf("ok.ru", "okru"),
-            "filemoon" to listOf("filemoon", "moonplayer", "moviesm4u", "files.im"),
-            "streamtape" to listOf("streamtape", "stp", "stape", "shavetape"),
-            "mixdrop" to listOf("mixdrop", "mxdrop", "mdbekjwqa"),
-            "streamwish" to listOf("sfastwish", "wishembed", "streamwish", "strwish", "wish", "Kswplayer", "Swhoi", "Multimovies", "Uqloads", "neko-stream", "swdyu", "iplayerhls", "streamgg"),
-            "doostream" to listOf("d-s.io", "dsvplay"),
-            "desuka" to listOf("stream/jkmedia"),
-            "nozomi" to listOf("jkplayer/um2?", "um2.php", "nozomi"),
-            "desu" to listOf("jkplayer/um?", "um.php"),
-            "magi" to listOf("jkplayer/umv?"),
-            "byse" to listOf("bysekoze", "bysefujedu"),
-            "mega" to listOf("mega.nz"),
-        )
     }
 }
 

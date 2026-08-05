@@ -10,6 +10,15 @@ ext {
 
 apply plugin: "symera.plugins.extension"
 
+android {
+    sourceSets {
+        test {
+            java.srcDirs = ['test']
+            kotlin.srcDirs = ['test']
+        }
+    }
+}
+
 dependencies {
     implementation(project(':lib:byse'))
 }
@@ -26,4 +35,9 @@ dependencies {
     implementation(project(':lib:streamwish'))
     implementation(project(':lib:streamsb'))
     implementation(project(':lib:universal'))
+}
+
+dependencies {
+    testImplementation(libs.bundles.common)
+    testImplementation(libs.junit)
 }
