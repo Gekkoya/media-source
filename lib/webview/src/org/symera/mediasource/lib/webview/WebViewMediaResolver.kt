@@ -35,5 +35,7 @@ class WebViewMediaResolver(
 
     companion object {
         const val DEFAULT_MEDIA_URL_PATTERN = "(?i).*\\.(m3u8|mp4|mpd)(\\?.*)?$"
+
+        fun isAllowedMediaHost(host: String?, allowedHosts: Set<String>): Boolean = host?.lowercase()?.let(allowedHosts::contains) == true
     }
 }
