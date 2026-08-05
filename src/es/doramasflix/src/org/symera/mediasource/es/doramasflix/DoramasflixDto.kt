@@ -52,7 +52,7 @@ data class DoramaDto(
 
 @Serializable
 data class MovieDto(
-    @SerialName("_id") val id: String = "",
+    @SerialName("_id") val id: String? = null,
     val name: String = "",
     @SerialName("name_es") val nameEs: String? = null,
     val title: String? = null,
@@ -97,7 +97,7 @@ data class SeasonRefDto(
     val slug: String = "",
     @SerialName("season_number") val seasonNumber: Double? = null,
     @SerialName("number_of_episodes") val numberOfEpisodes: Double? = null,
-    @SerialName("_id") val id: String = "",
+    @SerialName("_id") val id: String? = null,
     val ref: String? = null,
 )
 

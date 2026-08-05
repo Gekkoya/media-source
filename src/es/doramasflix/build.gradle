@@ -10,7 +10,18 @@ ext {
 
 apply plugin: "symera.plugins.extension"
 
+android {
+    sourceSets {
+        test {
+            java.srcDirs = ['test']
+            kotlin.srcDirs = ['test']
+        }
+    }
+}
+
 dependencies {
     implementation(project(':lib:fkplayer'))
     implementation(project(':lib-multisrc:pelisplus'))
+    testImplementation(libs.bundles.common)
+    testImplementation(libs.junit)
 }

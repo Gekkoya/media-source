@@ -1,7 +1,8 @@
 package org.symera.mediasource.es.doramasflix
 
-import android.util.Base64
+import android.util.Base64 as AndroidBase64
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -38,6 +39,48 @@ import org.symera.source.model.SStream
 import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import org.symera.source.online.asJsoup
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
+
+internal fun moviePaginationVariables(request: PageRequest): JsonObject = buildJsonObject {
+    put("page", JsonPrimitive(request.page))
+    put("perPage", JsonPrimitive(request.pageSize ?: 20))
+    put("sort", JsonPrimitive("CREATEDAT_DESC"))
+}
+
+internal fun seriesPaginationVariables(request: PageRequest): JsonObject = buildJsonObject {
+    put("page", JsonPrimitive(request.page))
+    put("perPage", JsonPrimitive(request.pageSize ?: 20))
+    put("sort", JsonPrimitive("CREATEDAT_DESC"))
+}
+
+private val catalogJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+    explicitNulls = false
+}
+
+internal fun parseMoviePage(root: JsonObject): ContentPage {
+    val pagination = root["data"]?.jsonObject?.get("paginationMovie")?.jsonObject
+        ?: return ContentPage.Empty
+    val items = pagination["items"]?.jsonArray?.map { element ->
+        catalogJson.decodeFromString(MovieDto.serializer(), element.toString()).toSContent()
+    } ?: emptyList()
+    val hasNext = pagination["pageInfo"]?.jsonObject?.get("hasNextPage")
+        ?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+    return ContentPage(items, hasNext)
+}
+
+internal fun parseSeriesPage(root: JsonObject): ContentPage {
+    val pagination = root["data"]?.jsonObject?.get("paginationDorama")?.jsonObject
+        ?: return ContentPage.Empty
+    val items = pagination["items"]?.jsonArray?.map { element ->
+        catalogJson.decodeFromString(DoramaDto.serializer(), element.toString()).toSContent()
+    } ?: emptyList()
+    val hasNext = pagination["pageInfo"]?.jsonObject?.get("hasNextPage")
+        ?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+    return ContentPage(items, hasNext)
+}
 
 class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
     override val name = "Doramasflix"
@@ -80,20 +123,22 @@ class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
             .build()
     }
 
-    private fun parseGqlData(response: Response): JsonObject {
+    private fun parseGqlRoot(response: Response): JsonObject {
         val body = response.body.string().orEmpty()
         if (body.isBlank() || body.startsWith("<!")) return JsonObject(emptyMap())
         val root = mediaSourceJson.parseToJsonElement(body).jsonObject
-        return root["data"]?.jsonObject ?: JsonObject(emptyMap())
+        return root
     }
+
+    private fun parseGqlData(response: Response): JsonObject = parseGqlRoot(response)["data"]?.jsonObject ?: JsonObject(emptyMap())
 
     private val dollar = "$"
 
     // region GraphQL Queries
 
     private val paginationDoramaQuery = """
-        query PaginationDorama(${dollar}page: Int, ${dollar}perPage: Int) {
-            paginationDorama(page: ${dollar}page, perPage: ${dollar}perPage) {
+        query PaginationDorama(${dollar}page: Int, ${dollar}perPage: Int, ${dollar}sort: SortFindManyDoramaInput) {
+            paginationDorama(page: ${dollar}page, perPage: ${dollar}perPage, sort: ${dollar}sort) {
                 pageInfo {
                     hasNextPage
                     itemCount
@@ -123,8 +168,8 @@ class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
     """.trimIndent()
 
     private val paginationMovieQuery = """
-        query PaginationMovie(${dollar}page: Int, ${dollar}perPage: Int) {
-            paginationMovie(page: ${dollar}page, perPage: ${dollar}perPage) {
+        query PaginationMovie(${dollar}page: Int, ${dollar}perPage: Int, ${dollar}sort: SortFindManyMovieInput) {
+            paginationMovie(page: ${dollar}page, perPage: ${dollar}perPage, sort: ${dollar}sort) {
                 pageInfo {
                     hasNextPage
                     itemCount
@@ -291,21 +336,10 @@ class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
 
     override fun seriesRequest(request: PageRequest, filters: FilterList): Request = gqlRequest(
         paginationDoramaQuery,
-        buildJsonObject {
-            put("page", JsonPrimitive(request.page))
-            put("perPage", JsonPrimitive(20))
-        },
+        seriesPaginationVariables(request),
     )
 
-    override fun seriesParse(response: Response): ContentPage {
-        val data = parseGqlData(response)
-        val pagination = data["paginationDorama"]?.jsonObject ?: return ContentPage.Empty
-        val items = pagination["items"]?.jsonArray?.map { element ->
-            strictJson.decodeFromString(DoramaDto.serializer(), element.toString()).toSContent()
-        } ?: emptyList()
-        val hasNext = pagination["pageInfo"]?.jsonObject?.get("hasNextPage")?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
-        return ContentPage(items, hasNext)
-    }
+    override fun seriesParse(response: Response): ContentPage = parseSeriesPage(parseGqlRoot(response))
 
     // endregion
 
@@ -313,21 +347,10 @@ class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
 
     override fun moviesRequest(request: PageRequest, filters: FilterList): Request = gqlRequest(
         paginationMovieQuery,
-        buildJsonObject {
-            put("page", JsonPrimitive(request.page))
-            put("perPage", JsonPrimitive(20))
-        },
+        moviePaginationVariables(request),
     )
 
-    override fun moviesParse(response: Response): ContentPage {
-        val data = parseGqlData(response)
-        val pagination = data["paginationMovie"]?.jsonObject ?: return ContentPage.Empty
-        val items = pagination["items"]?.jsonArray?.map { element ->
-            strictJson.decodeFromString(MovieDto.serializer(), element.toString()).toSContent()
-        } ?: emptyList()
-        val hasNext = pagination["pageInfo"]?.jsonObject?.get("hasNextPage")?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
-        return ContentPage(items, hasNext)
-    }
+    override fun moviesParse(response: Response): ContentPage = parseMoviePage(parseGqlRoot(response))
 
     // endregion
 
@@ -589,41 +612,42 @@ class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
     private fun parseHosters(response: Response): List<SHoster> {
         val data = parseGqlData(response)
         val source = data["getEpisodeLinks"] ?: data["getMovieLinks"] ?: return emptyList()
-        val linksArr = source.jsonObject["links_online"]?.jsonArray ?: return emptyList()
-        return parseLinksOnline(linksArr)
+        val sourceObject = source.jsonObject
+        val links = sourceObject["links_online"]?.asLinkElements().orEmpty()
+        val problems = (sourceObject["listProblems"] ?: data["listProblems"])
+            ?.asLinkElements()
+            .orEmpty()
+        return parseLinksOnline(links + problems)
     }
 
     private fun parseLinksOnline(linksJson: List<kotlinx.serialization.json.JsonElement>): List<SHoster> {
         return linksJson.mapNotNull { element ->
-            val obj = try {
-                element.jsonObject
-            } catch (_: Exception) {
-                null
-            } ?: return@mapNotNull null
-
-            val link = obj["link"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val langId = obj["lang"]?.jsonPrimitive?.contentOrNull
-            val lang = linkLanguage(langId)
-            val serverName = obj["server"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val playbackUrl = obj["embed"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: link
-            if (RETIRED_HOSTS.any { it in playbackUrl.lowercase() }) return@mapNotNull null
-            val hosterName = extractHosterName(
-                playbackUrl,
-                if (serverName.all(Char::isDigit)) "" else serverName,
+            val obj = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
+            val linkObject = obj["server"]?.let { runCatching { it.jsonObject }.getOrNull() } ?: obj
+            val link = linkObject["link"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val embed = linkObject["embed"]?.jsonPrimitive?.contentOrNull
+            val playbackUrl = DoramasflixHosterParser.effectiveUrl(link, embed)
+            val serverName = linkObject.stringValue("server")
+                ?: obj.stringValue("server")
+                ?: ""
+            val parsed = DoramasflixHosterParser.parseOne(playbackUrl, serverName) ?: return@mapNotNull null
+            val lang = linkLanguage(
+                linkObject.stringValue("lang")
+                    ?: obj.stringValue("lang"),
             )
 
             SHoster(
-                id = playbackUrl,
-                name = "$lang $hosterName".trim(),
-                requestUrl = playbackUrl,
-                resolverData = playbackUrl,
+                id = parsed.url,
+                name = "$lang ${parsed.hostName}".trim(),
+                requestUrl = parsed.url,
+                resolverData = parsed.url,
             )
-        }
+        }.distinctBy { it.id }
     }
 
     override suspend fun getStreams(hoster: SHoster): List<SStream> {
         val url = decodeFkPlayerUrl(hoster.requestUrl ?: return emptyList())
-        return serverVideoResolver(url, hoster.name, hoster.name).sortStreams()
+        return serverVideoResolver(url, hoster.name, url).sortStreams()
     }
 
     private suspend fun decodeFkPlayerUrl(url: String): String {
@@ -662,7 +686,7 @@ class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
                     ?.contentOrNull
                     ?: return url
             }
-            String(Base64.decode(encodedUrl, Base64.DEFAULT))
+            String(AndroidBase64.decode(encodedUrl, AndroidBase64.DEFAULT))
         } catch (_: Exception) {
             url
         }
@@ -703,50 +727,6 @@ class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
 
     // region Helpers
 
-    private fun DoramaDto.toSContent() = SContent(
-        url = "/doramas/$slug?_id=$id",
-        title = nameEs ?: name,
-        description = overview,
-        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
-        backdropUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" },
-        genres = genres?.mapNotNull { it.name }.orEmpty(),
-        contentType = ContentType.SERIES,
-        structure = ContentStructure.SEASONS,
-        release = ContentRelease(year = firstAirDate?.take(4)?.toIntOrNull()),
-        rating = voteAverage?.let { ContentRating(it, maximum = 10.0) },
-    )
-
-    private fun MovieDto.toSContent() = SContent(
-        url = "/peliculas/$slug?_id=$id",
-        title = nameEs ?: title ?: name,
-        description = overview,
-        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
-        backdropUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" },
-        genres = genres?.mapNotNull { it.name }.orEmpty(),
-        contentType = ContentType.MOVIE,
-        structure = ContentStructure.SINGLE_ITEM,
-        release = ContentRelease(year = releaseDate?.take(4)?.toIntOrNull()),
-        rating = voteAverage?.let { ContentRating(it, maximum = 10.0) },
-    )
-
-    private fun extractHosterName(url: String, serverName: String = ""): String = when {
-        serverName.isNotEmpty() -> serverName
-        "dood" in url || "d-s.io" in url || "dsvplay" in url || "do7go" in url -> "DoodStream"
-        "voe" in url || "tubelessceliolymph" in url || "simpulumlamerop" in url -> "Voe"
-        "streamtape" in url || "stp" in url || "stape" in url -> "StreamTape"
-        "streamwish" in url || "sfastwish" in url || "wishembed" in url || "strwish" in url -> "StreamWish"
-        "filemoon" in url || "moonplayer" in url || "files.im" in url -> "FileMoon"
-        "okru" in url || "ok.ru" in url -> "Okru"
-        "mixdrop" in url || "mxdrop" in url -> "MixDrop"
-        "vidhide" in url || "vidhidepre" in url -> "VidHide"
-        "uqload" in url -> "UqLoad"
-        "vudeo" in url -> "Vudeo"
-        "bysefujedu" in url -> "Byse"
-        "primeload" in url -> "PrimeLoad"
-        "streamsb" in url || "playersb" in url -> "StreamSB"
-        else -> url.substringAfter("://").substringBefore("/").substringBefore("?")
-    }
-
     private fun linkLanguage(langId: String?): String = when (langId) {
         "36" -> "[ENG]"
         "37" -> "[CAST]"
@@ -768,10 +748,121 @@ class Doramasflix(environment: SourceEnvironment) : PelisPlus(environment) {
     companion object {
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_DEFAULT = "1080"
-        private val RETIRED_HOSTS = setOf("vudeo.co", "repro3.estrenosdoramas.us")
         private val qualityList = listOf("1080", "720", "480", "360")
     }
 }
+
+private fun DoramaDto.toSContent() = SContent(
+    url = "/doramas/$slug?_id=$id",
+    title = nameEs ?: name,
+    description = overview,
+    posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+    backdropUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" },
+    genres = genres?.mapNotNull { it.name }.orEmpty(),
+    contentType = ContentType.SERIES,
+    structure = ContentStructure.SEASONS,
+    release = ContentRelease(year = firstAirDate?.take(4)?.toIntOrNull()),
+    rating = voteAverage?.let { ContentRating(it, maximum = 10.0) },
+)
+
+private fun MovieDto.toSContent() = SContent(
+    url = "/peliculas/$slug?_id=$id",
+    title = nameEs ?: title ?: name,
+    description = overview,
+    posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+    backdropUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w1280$it" },
+    genres = genres?.mapNotNull { it.name }.orEmpty(),
+    contentType = ContentType.MOVIE,
+    structure = ContentStructure.SINGLE_ITEM,
+    release = ContentRelease(year = releaseDate?.take(4)?.toIntOrNull()),
+    rating = voteAverage?.let { ContentRating(it, maximum = 10.0) },
+)
+
+internal data class DoramasflixParsedHoster(
+    val url: String,
+    val hostName: String,
+)
+
+internal object DoramasflixHosterParser {
+    fun parse(elements: List<JsonElement>): List<DoramasflixParsedHoster> = elements.mapNotNull { element ->
+        val obj = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
+        val linkObject = obj["server"]?.let { runCatching { it.jsonObject }.getOrNull() } ?: obj
+        val link = linkObject["link"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val embed = linkObject["embed"]?.jsonPrimitive?.contentOrNull
+        val serverName = linkObject.stringValue("server")
+            ?: obj.stringValue("server")
+            ?: ""
+        parseOne(effectiveUrl(link, embed), serverName)
+    }.distinctBy { it.url }
+
+    fun parsePayload(
+        linksOnline: List<JsonElement>,
+        listProblems: List<JsonElement>,
+    ): List<DoramasflixParsedHoster> = parse(linksOnline + listProblems)
+
+    fun parseOne(url: String, serverName: String): DoramasflixParsedHoster? {
+        val effectiveUrl = url.trim()
+        if (effectiveUrl.isBlank()) return null
+        val source = "$effectiveUrl $serverName".lowercase()
+        if ("mediafire" in source || RETIRED_HOSTS.any { it in effectiveUrl.lowercase() }) return null
+        return DoramasflixParsedHoster(effectiveUrl, hostName(effectiveUrl, serverName))
+    }
+
+    fun effectiveUrl(link: String, embed: String?): String = when {
+        link.contains("fkplayer.xyz", ignoreCase = true) -> link
+        !embed.isNullOrBlank() -> embed
+        else -> unwrapEmbedShortener(link)
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    private fun unwrapEmbedShortener(url: String): String {
+        if (!url.contains("embedshortener.co", ignoreCase = true)) return url
+        return runCatching {
+            val payload = url.substringAfterLast("/e/").substringBefore('?').split('.').getOrNull(1)
+                ?: return@runCatching url
+            val payloadJson = String(Base64.UrlSafe.decode(payload.padBase64()))
+            val encodedLink = Json.parseToJsonElement(payloadJson).jsonObject["link"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: return@runCatching url
+            String(Base64.decode(encodedLink.padBase64()))
+        }.getOrDefault(url)
+    }
+
+    private fun String.padBase64(): String = this + "=".repeat((4 - length % 4) % 4)
+
+    fun hostName(url: String, serverName: String = ""): String {
+        val lowerUrl = url.lowercase()
+        return when {
+            "dood" in lowerUrl || "d-s.io" in lowerUrl || "dsvplay" in lowerUrl || "do7go" in lowerUrl -> "DoodStream"
+            "voe" in lowerUrl || "tubelessceliolymph" in lowerUrl || "simpulumlamerop" in lowerUrl -> "Voe"
+            "streamtape" in lowerUrl || "stp" in lowerUrl || "stape" in lowerUrl -> "StreamTape"
+            "streamwish" in lowerUrl || "sfastwish" in lowerUrl || "wishembed" in lowerUrl || "strwish" in lowerUrl -> "StreamWish"
+            "filemoon" in lowerUrl || "moonplayer" in lowerUrl || "files.im" in lowerUrl -> "FileMoon"
+            "okru" in lowerUrl || "ok.ru" in lowerUrl -> "Okru"
+            "mixdrop" in lowerUrl || "mxdrop" in lowerUrl -> "MixDrop"
+            "vidhide" in lowerUrl || "vidhidepre" in lowerUrl -> "VidHide"
+            "uqload" in lowerUrl -> "UqLoad"
+            "vudeo" in lowerUrl -> "Vudeo"
+            "bysefujedu" in lowerUrl -> "Byse"
+            "primeload" in lowerUrl -> "PrimeLoad"
+            "streamsb" in lowerUrl || "playersb" in lowerUrl -> "StreamSB"
+            serverName.isNotBlank() && !serverName.all(Char::isDigit) -> serverName
+            else -> url.substringAfter("://").substringBefore("/").substringBefore("?")
+        }
+    }
+
+    private val RETIRED_HOSTS = setOf("vudeo.co", "repro3.estrenosdoramas.us")
+}
+
+private fun JsonElement.asLinkElements(): List<JsonElement> = when {
+    this is kotlinx.serialization.json.JsonArray -> this
+    this is JsonObject -> this["json"]?.asLinkElements() ?: listOf(this)
+    else -> emptyList()
+}
+
+private fun JsonObject.stringValue(key: String): String? =
+    runCatching { this[key]?.jsonPrimitive?.contentOrNull }.getOrNull()
 
 object DoramasflixFactory : SymeraExtensionFactory {
     override fun createVodSources(environment: SourceEnvironment) = listOf(Doramasflix(environment))
