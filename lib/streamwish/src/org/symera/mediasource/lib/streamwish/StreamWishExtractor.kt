@@ -19,6 +19,7 @@ import org.symera.source.model.SStream
 import org.symera.source.model.SubtitleTrack
 import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
+import kotlin.coroutines.cancellation.CancellationException
 
 class StreamWishExtractor(private val client: OkHttpClient, private val headers: Headers) {
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
@@ -33,13 +34,24 @@ class StreamWishExtractor(private val client: OkHttpClient, private val headers:
     suspend fun streamsFromUrl(url: String, prefix: String) = streamsFromUrl(url) { "$prefix - $it" }
 
     suspend fun streamsFromUrl(url: String, videoNameGen: (String) -> String = { quality -> "StreamWish - $quality" }): List<SStream> {
+        val originalUrl = url.toHttpUrl()
         val embedUrl = getEmbedUrl(url).toHttpUrl()
         val id = getEmbedId(url)
         val isAbsoluteId = id.startsWith("https://") || id.startsWith("http://")
-        val domainsToTry = if (isAbsoluteId) listOf("") else DOMAINS
+        val domainsToTry = if (isAbsoluteId) {
+            listOf("")
+        } else {
+            hostCandidates(url)
+        }
 
         for (domain in domainsToTry) {
-            val fullUrl = UrlUtils.fixUrl(id, "https://$domain") ?: continue
+            val fullUrl = if (domain.equals(originalUrl.host, ignoreCase = true)) {
+                originalUrl.toString()
+            } else if (domain.equals(embedUrl.host, ignoreCase = true)) {
+                embedUrl.toString()
+            } else {
+                UrlUtils.fixUrl(id, "https://$domain")
+            } ?: continue
             try {
                 val response = client.awaitSuccess(GET(fullUrl, headers))
                 val body = response.bodyString()
@@ -59,18 +71,30 @@ class StreamWishExtractor(private val client: OkHttpClient, private val headers:
                 }
 
                 val scriptBody = doc.selectFirst("script:containsData(m3u8)")?.data()?.let { script ->
-                    if (script.contains("eval(function(p,a,c")) JsUnpacker.unpackAndCombine(script) else script
+                    val unpacked = if (script.contains("eval(function(p,a,c")) JsUnpacker.unpackAndCombine(script) else script
+                    unpacked
                 }
                 val masterUrl = scriptBody?.let { M3U8_REGEX.find(it)?.value }
                 if (masterUrl != null) {
                     val subtitleList = extractSubtitles(scriptBody)
-                    return playlistUtils.extractFromHls(
+                    val referer = masterUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}/" } ?: "https://${url.toHttpUrl().host}/"
+                    val fixedSubtitles = playlistUtils.fixSubtitles(subtitleList)
+                    return playlistUtils.withDirectHlsFallback(
                         playlistUrl = masterUrl,
-                        referer = masterUrl.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}/" } ?: "https://${url.toHttpUrl().host}/",
-                        videoNameGen = videoNameGen,
-                        subtitleList = playlistUtils.fixSubtitles(subtitleList),
-                    )
+                        title = videoNameGen("HLS"),
+                        headers = playlistUtils.generateMasterHeaders(headers, referer),
+                        subtitleList = fixedSubtitles,
+                    ) {
+                        playlistUtils.extractFromHls(
+                            playlistUrl = masterUrl,
+                            referer = referer,
+                            videoNameGen = videoNameGen,
+                            subtitleList = fixedSubtitles,
+                        )
+                    }
                 }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (_: Exception) {
                 if (isAbsoluteId) return emptyList()
             }
@@ -106,5 +130,11 @@ class StreamWishExtractor(private val client: OkHttpClient, private val headers:
         private val M3U8_REGEX by lazy { Regex("""https[^"]*m3u8[^"]*""") }
         private val FIX_TRACKS_REGEX by lazy { Regex("""(?<!")(file|kind|label)(?!")""") }
         private val DOMAINS = listOf("streamwish.com", "niramirus.com", "medixiru.com")
+
+        fun hostCandidates(url: String): List<String> {
+            val originalHost = url.toHttpUrl().host
+            val canonicalHost = if (url.contains("/f/")) "streamwish.com" else originalHost
+            return (listOf(originalHost, canonicalHost) + DOMAINS).distinct()
+        }
     }
 }
