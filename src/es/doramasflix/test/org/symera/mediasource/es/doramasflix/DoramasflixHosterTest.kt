@@ -92,9 +92,11 @@ class DoramasflixHosterTest {
     @Test
     fun `nested server link uses same parser`() {
         val hosters = DoramasflixHosterParser.parse(
-            listOf(buildJsonObject {
-                put("server", link(link = "https://doodstream.com/e/a"))
-            }),
+            listOf(
+                buildJsonObject {
+                    put("server", link(link = "https://doodstream.com/e/a"))
+                },
+            ),
         )
 
         assertEquals("https://doodstream.com/e/a", hosters.single().url)

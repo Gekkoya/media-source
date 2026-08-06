@@ -1,9 +1,9 @@
 package org.symera.mediasource.es.doramasflix
 
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -75,7 +75,10 @@ class DoramasflixCatalogResponseTest {
 
     @Test
     fun `moviesParse maps full graphql response`() {
-        val page = invokeParser("moviesParse", response("""
+        val page = invokeParser(
+            "moviesParse",
+            response(
+                """
             {
               "data": {
                 "paginationMovie": {
@@ -84,7 +87,9 @@ class DoramasflixCatalogResponseTest {
                 }
               }
             }
-        """))
+        """,
+            ),
+        )
 
         assertEquals("The Debt Collector", page.contents.single().title)
         assertEquals(ContentType.MOVIE, page.contents.single().contentType)
@@ -93,7 +98,10 @@ class DoramasflixCatalogResponseTest {
 
     @Test
     fun `seriesParse maps full graphql response`() {
-        val page = invokeParser("seriesParse", response("""
+        val page = invokeParser(
+            "seriesParse",
+            response(
+                """
             {
               "data": {
                 "paginationDorama": {
@@ -102,7 +110,9 @@ class DoramasflixCatalogResponseTest {
                 }
               }
             }
-        """))
+        """,
+            ),
+        )
 
         assertEquals("Goblin", page.contents.single().title)
         assertEquals(ContentType.SERIES, page.contents.single().contentType)

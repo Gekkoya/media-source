@@ -1,7 +1,7 @@
 package org.symera.mediasource.es.doramasflix
 
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.symera.source.model.PageRequest
