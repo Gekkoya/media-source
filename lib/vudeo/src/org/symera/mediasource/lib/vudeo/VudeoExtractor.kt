@@ -26,9 +26,7 @@ class VudeoExtractor(
     }
 
     internal companion object {
-        fun parseSources(script: String, url: String, prefix: String = ""): List<PlayableStream> {
-            return parseSources(script, url, prefix, Headers.EMPTY)
-        }
+        fun parseSources(script: String, url: String, prefix: String = ""): List<PlayableStream> = parseSources(script, url, prefix, Headers.EMPTY)
 
         fun parseSources(script: String, url: String, prefix: String, headers: Headers): List<PlayableStream> {
             val sourceBody = Regex("""sources\s*:\s*\[([^]]*)]""").find(script)?.groupValues?.get(1) ?: return emptyList()

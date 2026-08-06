@@ -1,6 +1,5 @@
 package org.symera.mediasource.es.doramasflix
 
-import android.util.Base64 as AndroidBase64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -41,6 +40,7 @@ import org.symera.source.online.GET
 import org.symera.source.online.asJsoup
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
+import android.util.Base64 as AndroidBase64
 
 internal fun moviePaginationVariables(request: PageRequest): JsonObject = buildJsonObject {
     put("page", JsonPrimitive(request.page))
@@ -861,8 +861,7 @@ private fun JsonElement.asLinkElements(): List<JsonElement> = when {
     else -> emptyList()
 }
 
-private fun JsonObject.stringValue(key: String): String? =
-    runCatching { this[key]?.jsonPrimitive?.contentOrNull }.getOrNull()
+private fun JsonObject.stringValue(key: String): String? = runCatching { this[key]?.jsonPrimitive?.contentOrNull }.getOrNull()
 
 object DoramasflixFactory : SymeraExtensionFactory {
     override fun createVodSources(environment: SourceEnvironment) = listOf(Doramasflix(environment))

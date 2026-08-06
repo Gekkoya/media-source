@@ -515,7 +515,6 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
                 RegexOption.DOT_MATCHES_ALL,
             )
         }
-
     }
 }
 

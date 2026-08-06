@@ -1,11 +1,10 @@
 package org.symera.mediasource.lib.uqload
 
-import okhttp3.Headers
 import okhttp3.OkHttpClient
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.unpacker.autoUnpacker
-import org.symera.source.model.HttpHeader
 import org.symera.source.model.HeaderScope
+import org.symera.source.model.HttpHeader
 import org.symera.source.model.MediaRequest
 import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream

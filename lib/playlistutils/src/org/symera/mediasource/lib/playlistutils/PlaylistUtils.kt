@@ -20,8 +20,8 @@ import org.symera.source.model.SubtitleTrack
 import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import java.io.File
-import kotlin.math.abs
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.abs
 
 class PlaylistUtils(private val client: OkHttpClient, private val headers: Headers = commonEmptyHeaders) {
     fun extractFromHls(

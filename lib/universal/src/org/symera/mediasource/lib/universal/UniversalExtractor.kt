@@ -50,16 +50,16 @@ class UniversalExtractor(
         return when {
             request.uri.contains("m3u8", ignoreCase = true) -> {
                 val extracted = playlistUtils.withDirectHlsFallback(
+                    playlistUrl = request.uri,
+                    title = "$titlePrefix - HLS",
+                    headers = mediaHeadersWithReferer,
+                ) {
+                    playlistUtils.extractFromHls(
                         playlistUrl = request.uri,
-                        title = "$titlePrefix - HLS",
-                        headers = mediaHeadersWithReferer,
-                    ) {
-                        playlistUtils.extractFromHls(
-                            playlistUrl = request.uri,
-                            referer = mediaReferer,
-                            masterHeaders = mediaHeadersWithReferer,
-                            videoHeaders = mediaHeadersWithReferer,
-                            videoNameGen = { "$titlePrefix - $it" },
+                        referer = mediaReferer,
+                        masterHeaders = mediaHeadersWithReferer,
+                        videoHeaders = mediaHeadersWithReferer,
+                        videoNameGen = { "$titlePrefix - $it" },
                     ).map { stream ->
                         if (stream is PlayableStream) stream.copy(request = stream.request.copy(headerScope = HeaderScope.ALL_DERIVED_REQUESTS)) else stream
                     }

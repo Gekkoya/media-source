@@ -5,9 +5,9 @@ import okhttp3.OkHttpClient
 import org.symera.mediasource.core.commonEmptyHeaders
 import org.symera.mediasource.core.useAsJsoup
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
-import org.symera.source.model.MediaRequest
 import org.symera.source.model.HeaderScope
 import org.symera.source.model.HttpHeader
+import org.symera.source.model.MediaRequest
 import org.symera.source.model.PlayableStream
 import org.symera.source.model.SStream
 import org.symera.source.online.GET
@@ -75,10 +75,8 @@ class OkruExtractor(private val client: OkHttpClient, private val headers: Heade
             return ParsedOptions(link("ondemandHls"), link("ondemandDash"))
         }
 
-        fun parseVideos(videoString: String, prefix: String = "", fixQualities: Boolean = true, referer: String? = null): List<PlayableStream> =
-            parseVideos(videoString, prefix, fixQualities, referer?.let { Headers.headersOf("Referer", it) } ?: Headers.EMPTY)
+        fun parseVideos(videoString: String, prefix: String = "", fixQualities: Boolean = true, referer: String? = null): List<PlayableStream> = parseVideos(videoString, prefix, fixQualities, referer?.let { Headers.headersOf("Referer", it) } ?: Headers.EMPTY)
     }
-
 }
 
 private fun normalizeHttpsUrl(url: String): String = url.replaceFirst("^http://".toRegex(), "https://")
