@@ -33,7 +33,7 @@ class LuluExtractor(
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (error: Exception) {
-        Log.w("LuluExtractor", "Failed url=$url message=${error.message}", error)
+        Log.w("LuluExtractor", "failure host=${url.toHttpUrlOrNull()?.host ?: "unknown"} category=${error.javaClass.simpleName}")
         emptyList()
     }
 

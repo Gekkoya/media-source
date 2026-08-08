@@ -39,6 +39,7 @@ import org.symera.source.model.ContentType
 import org.symera.source.model.Filter
 import org.symera.source.model.FilterList
 import org.symera.source.model.PageRequest
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.PlayableItemType
 import org.symera.source.model.SContent
 import org.symera.source.model.SHoster
@@ -290,10 +291,7 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
         return try {
             response.use { json.decodeFromString<EpisodesPageDto>(it.body.string()) }
         } catch (failure: Exception) {
-            environment.logger.error(
-                "Unable to load Jkanime episodes for $animeId page $currentPage (HTTP ${response.code})",
-                failure,
-            )
+            environment.logger.error("Jkanime episode page unavailable: decode_error")
             throw failure
         }
     }
@@ -303,7 +301,7 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
         return getVideoLinks(document).filterNot { (url) -> url.isDownloadUrl() }.map { (url, lang, name) ->
             val matched = JkanimeRouting.match(url, name.lowercase())
             SHoster(
-                id = url,
+                id = hosterId(response.request.url.encodedPath, "$matched|$lang|$name"),
                 name = listOf(lang, name.ifBlank { matched }).filter { it.isNotBlank() }.joinToString(" "),
                 requestUrl = url,
                 resolverData = listOf(lang, name, matched).joinToString("\t"),
@@ -320,7 +318,7 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
 
         return when (matched) {
             "okru" -> okruExtractor.streamsFromUrl(url, streamLang)
-            "voe" -> voeExtractor.streamsFromUrl(url, "$streamLang ")
+            "voe" -> stableVoeStreams(hoster, voeExtractor.streamsFromUrl(url, "$streamLang "))
             "filemoon" -> filemoonExtractor.streamsFromUrl(url, prefix = "$streamLang Filemoon:")
             "streamtape" -> streamTapeExtractor.streamsFromUrl(url, quality = "$streamLang StreamTape")
             "streamwish" -> streamWishExtractor.streamsFromUrl(url) { "$streamLang StreamWish: $it" }
@@ -332,10 +330,10 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
             "byse" -> byseExtractor.streamsFromUrl(url, streamLang).ifEmpty {
                 filemoonExtractor.streamsFromUrl(url, prefix = "$streamLang Byse:", headers = headers)
             }
-            "desuka" -> jkanimeExtractor.getDesukaFromUrl(url, "$streamLang ")
-            "nozomi" -> jkanimeExtractor.getNozomiFromUrl(url, "$streamLang ")
-            "desu" -> jkanimeExtractor.getDesuFromUrl(url, "$streamLang ")
-            "magi" -> jkanimeExtractor.getMagiFromUrl(url, "$streamLang ")
+            "desuka" -> jkanimeExtractor.getDesukaFromUrl(url, "$streamLang ", hoster.id)
+            "nozomi" -> jkanimeExtractor.getNozomiFromUrl(url, "$streamLang ", hoster.id)
+            "desu" -> jkanimeExtractor.getDesuFromUrl(url, "$streamLang ", hoster.id)
+            "magi" -> jkanimeExtractor.getMagiFromUrl(url, "$streamLang ", hoster.id)
             else -> universalExtractor.streamsFromUrl(url, headers, prefix = "$streamLang $name")
         }.sortStreams()
     }
@@ -515,6 +513,20 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
                 RegexOption.DOT_MATCHES_ALL,
             )
         }
+
+        private fun hosterId(pageIdentity: String, serverIdentity: String): String =
+            JkanimeExtractor.streamId(pageIdentity, "hoster:$serverIdentity")
+
+        internal fun stableVoeStreams(hoster: SHoster, streams: List<SStream>): List<SStream> =
+            streams.map { stream ->
+                when (stream) {
+                    is PlayableStream ->
+                        stream.copy(
+                            id = JkanimeExtractor.streamId(hoster.id, "voe|${stream.protocol}|${stream.title.orEmpty()}"),
+                        )
+                    else -> stream
+                }
+            }
     }
 }
 

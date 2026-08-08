@@ -2,6 +2,7 @@ package org.symera.mediasource.lib.emturbo
 
 import android.util.Log
 import okhttp3.Headers
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
 import org.symera.source.model.SStream
@@ -20,15 +21,17 @@ class EmTurboExtractor(
         }
         val hlsUrl = URL_PLAY_REGEX.find(script)?.groupValues?.get(1)
             ?: run {
-                Log.w("EmTurboExtractor", "No urlPlay url=$url")
+                Log.w("EmTurboExtractor", "failure host=${url.safeHost()} category=missing_url_play")
                 return emptyList()
             }
         playlistUtils.extractFromHls(hlsUrl, url) { quality -> "$prefix EmTurbo: $quality" }
     }.onFailure { error ->
-        Log.w("EmTurboExtractor", "Failed url=$url message=${error.message}")
+        Log.w("EmTurboExtractor", "failure host=${url.safeHost()} category=${error.javaClass.simpleName}")
     }.getOrDefault(emptyList())
 
     private companion object {
         val URL_PLAY_REGEX = Regex("""urlPlay\s*=\s*'([^']+)""")
     }
+
+    private fun String.safeHost(): String = toHttpUrlOrNull()?.host ?: "unknown"
 }

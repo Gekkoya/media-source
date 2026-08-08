@@ -120,7 +120,7 @@ class FilemoonExtractor(
                 )
             }
         } catch (e: Exception) {
-            Log.e("FilemoonExtractor", "Failed to extract video from $url", e)
+            Log.e("FilemoonExtractor", "failure host=${url.safeHost()} category=${e.javaClass.simpleName}")
             fallbackStreamsFromUrl(url, prefix, headers)
         }
     }
@@ -238,7 +238,9 @@ class FilemoonExtractor(
         val playbackHeaders = captchaHeaders.newBuilder().set("X-Captcha-Token", verified.token).build()
         client.newCall(POST("$origin/api/videos/$mediaId/embed/playback", playbackHeaders, json.encodeToString(FingerprintPayload(fingerprint)).toRequestBody("application/json".toMediaType())))
             .execute().parseAs<PlaybackResponse>()
-    }.onFailure { Log.w("FilemoonExtractor", "Attestation failed for $pageUrl", it) }.getOrNull()
+    }.onFailure { error ->
+        Log.w("FilemoonExtractor", "attestation host=${pageUrl.safeHost()} category=${error.javaClass.simpleName}")
+    }.getOrNull()
 
     private fun generateEcKeyPair(): Pair<java.security.PrivateKey, EcJwk> {
         val generator = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1"), SecureRandom()) }
@@ -251,6 +253,8 @@ class FilemoonExtractor(
         }
         return pair.private to EcJwk("ES256", "P-256", true, listOf("verify"), "EC", coordinate(publicKey.w.affineX), coordinate(publicKey.w.affineY))
     }
+
+    private fun String.safeHost(): String = runCatching { toHttpUrl().host }.getOrDefault("unknown")
 
     private fun signNonce(privateKey: java.security.PrivateKey, nonce: String): String = Signature.getInstance("SHA256withECDSA").run {
         initSign(privateKey)

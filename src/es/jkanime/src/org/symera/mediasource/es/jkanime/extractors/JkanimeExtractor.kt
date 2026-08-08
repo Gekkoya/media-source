@@ -14,9 +14,10 @@ import org.symera.source.model.SStream
 import org.symera.source.online.GET
 import org.symera.source.online.POST
 import org.symera.source.online.asJsoup
+import java.security.MessageDigest
 
 class JkanimeExtractor(private val client: OkHttpClient) {
-    fun getNozomiFromUrl(url: String, prefix: String = ""): List<SStream> {
+    fun getNozomiFromUrl(url: String, prefix: String = "", identity: String): List<SStream> {
         val dataKeyHeaders = Headers.Builder().add("Referer", url).build()
         val doc = client.newCall(GET(url, dataKeyHeaders)).execute().asJsoup()
         val dataKey = doc.select("form input[value]").attr("value")
@@ -30,56 +31,66 @@ class JkanimeExtractor(private val client: OkHttpClient) {
         val nozomiResponse = client.newCall(POST("https://jkanime.net/gsplay/api.php", body = nozomiBody)).execute()
         val nozomiUrl = nozomiResponse.body.string().parseAs<NozomiResponse>().file ?: return emptyList()
 
-        return listOf(PlayableStream(id = nozomiUrl, title = "${prefix}Nozomi", request = MediaRequest(nozomiUrl)))
+        return listOf(PlayableStream(id = streamId(identity, "nozomi"), title = "${prefix}Nozomi", request = MediaRequest(nozomiUrl)))
     }
 
-    fun parseStreamFromDpPlayer(response: Response, quality: String = ""): List<SStream> {
+    fun parseStreamFromDpPlayer(response: Response, quality: String = "", identity: String): List<SStream> {
         val document = response.asJsoup()
         val streamUrl = document
             .selectFirst("""script:containsData(new DPlayer\({)""")
             ?.data()?.substringAfter("url: '")
             ?.substringBefore("'") ?: return emptyList()
 
-        return listOf(PlayableStream(id = streamUrl, title = quality.ifBlank { "Jkanime" }, request = MediaRequest(streamUrl)))
+        return listOf(PlayableStream(id = streamId(identity, "dp-player"), title = quality.ifBlank { "Jkanime" }, request = MediaRequest(streamUrl)))
     }
 
-    fun getDesuFromUrl(url: String, prefix: String = ""): List<SStream> {
+    fun getDesuFromUrl(url: String, prefix: String = "", identity: String): List<SStream> {
         val response = client.newCall(GET(url)).execute()
-        return parseStreamFromDpPlayer(response, "${prefix}Desu")
+        return parseStreamFromDpPlayer(response, "${prefix}Desu", identity)
     }
 
-    fun getDesukaFromUrl(url: String, prefix: String = ""): List<SStream> {
+    fun getDesukaFromUrl(url: String, prefix: String = "", identity: String): List<SStream> {
         val response = client.newCall(GET(url)).execute()
         val contentType = response.header("Content-Type") ?: ""
 
         if (contentType.startsWith("video/")) {
             val realUrl = response.request.url.toString()
-            return listOf(PlayableStream(id = realUrl, title = "${prefix}Desuka", request = MediaRequest(realUrl)))
+            return listOf(PlayableStream(id = streamId(identity, "desuka"), title = "${prefix}Desuka", request = MediaRequest(realUrl)))
         }
-        return parseStreamFromDpPlayer(response, "${prefix}Desuka")
+        return parseStreamFromDpPlayer(response, "${prefix}Desuka", identity)
     }
 
-    fun getMagiFromUrl(url: String, prefix: String = ""): List<SStream> {
+    fun getMagiFromUrl(url: String, prefix: String = "", identity: String): List<SStream> {
         val document = client.newCall(GET(url, Headers.headersOf("Referer", "https://jkanime.net/"))).execute().asJsoup()
         val videoUrl = document.selectFirst("""source[src*=".m3u8"]""")?.attr("abs:src") ?: return emptyList()
         return listOf(
             PlayableStream(
-                id = videoUrl,
+                id = streamId(identity, "magi"),
                 title = "${prefix}Magi",
                 request = MediaRequest(videoUrl, headers = listOf(HttpHeader("Referer", url))),
             ),
         )
     }
 
-    fun getMediafireFromUrl(url: String, prefix: String = ""): List<SStream> {
+    fun getMediafireFromUrl(url: String, prefix: String = "", identity: String): List<SStream> {
         val response = client.newCall(GET(url)).execute()
         val downloadUrl = response.asJsoup().selectFirst("a#downloadButton")?.attr("href")
         if (!downloadUrl.isNullOrBlank()) {
-            return listOf(PlayableStream(id = downloadUrl, title = "${prefix}MediaFire", request = MediaRequest(downloadUrl)))
+            return listOf(PlayableStream(id = streamId(identity, "mediafire"), title = "${prefix}MediaFire", request = MediaRequest(downloadUrl)))
         }
         return emptyList()
     }
 
     @Serializable
     data class NozomiResponse(val file: String? = null)
+
+    companion object {
+        fun streamId(pageIdentity: String, serverIdentity: String): String = "jkanime-${sha256("$pageIdentity|$serverIdentity")}"
+
+        private fun sha256(value: String): String =
+            MessageDigest
+                .getInstance("SHA-256")
+                .digest(value.toByteArray(Charsets.UTF_8))
+                .joinToString("") { byte -> "%02x".format(byte) }
+    }
 }

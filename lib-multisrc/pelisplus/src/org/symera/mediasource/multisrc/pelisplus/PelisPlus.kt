@@ -37,6 +37,7 @@ import org.symera.source.model.SourcePreference
 import org.symera.source.network.awaitSuccess
 import org.symera.source.online.GET
 import org.symera.source.online.SymeraHttpSource
+import java.security.MessageDigest
 import kotlin.coroutines.cancellation.CancellationException
 
 abstract class PelisPlus(
@@ -123,7 +124,7 @@ abstract class PelisPlus(
             "streamsb" -> streamSbExtractor.streamsFromUrl(url, prefix)
             else -> browserStreams(url, "$prefix ")
         }
-        Log.d("SymeraHoster", "route=$matched name=$serverName host=${url.substringAfter("://").substringBefore("/")} streams=${streams.size}")
+        Log.d("SymeraHoster", "host=${url.safeHost()} streams=${streams.size}")
         return streams
     }
 
@@ -154,7 +155,7 @@ abstract class PelisPlus(
         val amazonApi = client.awaitSuccess(GET("https://www.amazon.com/drive/v1/nodes/$epId/children?resourceVersion=V2&ContentType=JSON&limit=200&sort=%5B%22kind+DESC%22%2C+%22modifiedDate+DESC%22%5D&asset=ALL&tempLink=true&shareId=$shareId"))
             .useAsJsoup()
         val videoUrl = amazonApi.toString().substringAfter("\"FOLDER\":").substringAfter("tempLink\":\"").substringBefore("\"")
-        return listOf(PlayableStream(id = videoUrl, title = "$prefix Amazon", request = MediaRequest(uri = videoUrl)))
+        return listOf(PlayableStream(id = amazonStreamId(epId), title = "$prefix Amazon", request = MediaRequest(uri = videoUrl)))
     }
 
     protected fun fetchUrls(text: String?): List<String> {
@@ -262,6 +263,10 @@ abstract class PelisPlus(
             names.any { it.lowercase() in source.lowercase() }
         }?.first
 
+        fun amazonStreamId(epId: String): String = "amazon-${sha256(epId)}"
+
+        private fun String.safeHost(): String = runCatching { toHttpUrl().host }.getOrDefault("unknown")
+
         internal suspend fun resolveVudeoStreams(
             http: suspend () -> List<SStream>,
             browser: suspend () -> List<SStream>,
@@ -280,5 +285,11 @@ abstract class PelisPlus(
             http: suspend () -> List<SStream>,
             browser: suspend () -> List<SStream>,
         ): List<SStream> = resolveVudeoStreams(http, browser)
+
+        private fun sha256(value: String): String =
+            MessageDigest
+                .getInstance("SHA-256")
+                .digest(value.toByteArray(Charsets.UTF_8))
+                .joinToString("") { byte -> "%02x".format(byte) }
     }
 }

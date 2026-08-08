@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Headers
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
 import org.symera.source.model.SStream
@@ -97,7 +98,7 @@ class ByseExtractor(
             playlistUtils.extractFromHls(sourceUrl, url) { quality -> "$prefix Byse: $quality" }
         }.flatten()
     }.onFailure { error ->
-        Log.w("ByseExtractor", "Failed url=$url message=${error.message}")
+        Log.w("ByseExtractor", "failure host=${url.safeHost()} category=${error.javaClass.simpleName}")
     }.getOrDefault(emptyList())
 
     private fun decrypt(playback: JsonObject): JsonObject? = runCatching {
@@ -127,4 +128,6 @@ class ByseExtractor(
     private companion object {
         const val GCM_TAG_BYTES = 16
     }
+
+    private fun String.safeHost(): String = toHttpUrlOrNull()?.host ?: "unknown"
 }

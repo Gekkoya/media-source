@@ -33,12 +33,12 @@ class MixDropExtractor(private val client: OkHttpClient) {
         val packedScript = doc.selectFirst("script:containsData(eval):containsData(MDCore)")
             ?.data()
         if (packedScript == null) {
-            Log.w(TAG, "No legacy eval/MDCore script found url=$url")
+            Log.w(TAG, "failure host=${safeHost(url)} category=missing_script")
             return emptyList()
         }
         val unpacked = autoUnpacker(packedScript)
         if (unpacked.isNullOrBlank()) {
-            Log.w(TAG, "Unpacker returned empty payload scriptLength=${packedScript.length}")
+            Log.w(TAG, "failure host=${safeHost(url)} category=empty_payload")
             return emptyList()
         }
 
@@ -56,14 +56,10 @@ class MixDropExtractor(private val client: OkHttpClient) {
             .orEmpty()
             .replace("\\/", "/")
             .trim()
-        Log.d(
-            TAG,
-            "Decoded fields payloadLength=${unpacked.length} " +
-                "videoRaw=${describe(rawVideoPath)} subtitleRaw=${describe(rawSubtitle)}",
-        )
+        Log.d(TAG, "host=${safeHost(url)} protocol=${protocol(rawVideoPath)}")
         val videoUrl = normalizeMediaUrl(rawVideoPath, url)
         if (videoUrl == null) {
-            Log.w(TAG, "Invalid video candidate raw=${describe(rawVideoPath)}")
+            Log.w(TAG, "failure host=${safeHost(url)} category=invalid_media_candidate")
             return emptyList()
         }
         val subs = rawSubtitle
@@ -72,11 +68,7 @@ class MixDropExtractor(private val client: OkHttpClient) {
                 val decodedUrl = runCatching { URLDecoder.decode(encodedUrl, "utf-8") }.getOrNull()
                 val subtitleUrl = decodedUrl?.let { normalizeMediaUrl(it, url, allowRelative = true) }
                 val format = subtitleUrl?.let(::subtitleFormat) ?: SubtitleFormat.UNKNOWN
-                Log.d(
-                    TAG,
-                    "Subtitle candidate encoded=${describe(encodedUrl)} decoded=${describe(decodedUrl)} " +
-                        "normalized=${describe(subtitleUrl)} resource=${describeUri(subtitleUrl)} format=$format",
-                )
+                Log.d(TAG, "host=${safeHost(url)} protocol=${protocol(subtitleUrl)}")
                 if (subtitleUrl != null && format != SubtitleFormat.UNKNOWN) {
                     listOf(
                         SubtitleTrack(
@@ -110,14 +102,9 @@ class MixDropExtractor(private val client: OkHttpClient) {
     private companion object {
         const val TAG = "MixDropExtractor"
 
-        fun describe(value: String?): String = value?.let { "\"${it.take(500)}\"(len=${it.length})" } ?: "<null>"
+        fun safeHost(value: String?): String = runCatching { value?.let(::URI)?.host }.getOrNull() ?: "unknown"
 
-        fun describeUri(value: String?): String = value?.let {
-            runCatching {
-                val uri = URI(it)
-                "scheme=${uri.scheme} host=${uri.host} path=${uri.path} query=${uri.query}"
-            }.getOrElse { error -> "invalid=${error.message}" }
-        } ?: "<null>"
+        fun protocol(value: String?): String = runCatching { value?.let(::URI)?.scheme }.getOrNull() ?: "unknown"
     }
 }
 

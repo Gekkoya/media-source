@@ -56,6 +56,14 @@ public class PelisPlusRoutingTest {
     }
 
     @Test
+    public void amazonStreamIdUsesStableEpIdInsteadOfTemporaryMediaUrl() {
+        assertEquals(
+            "amazon-cc7297c71828ab208411654e48e65cd77aac1cdf564e6b1cf078d2a9fc71bccc",
+            PelisPlus.Companion.amazonStreamId("amazon-ep-42")
+        );
+    }
+
+    @Test
     public void okruHttpFailureFallsThroughToBrowserResolver() throws InterruptedException {
         List<SStream> streams = resolveHttpThenBrowser(
             ignored -> { throw new IllegalStateException("HTTP failed"); },

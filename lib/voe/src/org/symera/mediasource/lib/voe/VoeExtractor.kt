@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Headers
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.symera.mediasource.lib.playlistutils.PlaylistUtils
 import org.symera.source.model.MediaRequest
@@ -36,7 +37,7 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
 
         val encodedString = document.selectFirst("script[type=application/json]")?.data()
             ?.trim()?.substringAfter("[\"")?.substringBeforeLast("\"]") ?: return emptyList()
-        val decryptedJson = decryptF7(encodedString) ?: return emptyList()
+        val decryptedJson = decryptF7(encodedString, url.toHttpUrlOrNull()?.host ?: "unknown") ?: return emptyList()
         val m3u8 = decryptedJson["source"]?.jsonPrimitive?.contentOrNull
         val mp4 = decryptedJson["direct_access_url"]?.jsonPrimitive?.contentOrNull
 
@@ -50,7 +51,7 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
         return streamList
     }
 
-    private fun decryptF7(p8: String): JsonObject? = try {
+    private fun decryptF7(p8: String, host: String): JsonObject? = try {
         val vF = rot13(p8)
         val vF2 = replacePatterns(vF)
         val vF3 = removeUnderscores(vF2)
@@ -60,7 +61,7 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
         val vAtob = base64Decode(vF6)
         json.decodeFromString<JsonObject>(vAtob)
     } catch (e: Exception) {
-        Log.e("VoeExtractor", "Decryption error: ${e.message}", e)
+        Log.e("VoeExtractor", "decryption host=$host category=${e.javaClass.simpleName}")
         null
     }
 
