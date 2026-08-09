@@ -18,8 +18,8 @@ import org.symera.source.SourceEnvironment
 import org.symera.source.SourceLogger
 import org.symera.source.SourcePreferenceStore
 import org.symera.source.SourcePreferenceValues
-import org.symera.source.model.SHoster
 import org.symera.source.model.PlayableStream
+import org.symera.source.model.SHoster
 
 class JkanimeRoutingTest {
     @Test
@@ -128,16 +128,16 @@ class JkanimeRoutingTest {
             Jkanime(
                 testEnvironment(
                     httpClient =
-                        OkHttpClient.Builder()
-                            .addInterceptor { chain ->
-                                Response.Builder()
-                                    .request(chain.request())
-                                    .protocol(Protocol.HTTP_1_1)
-                                    .code(500)
-                                    .message("Server Error")
-                                    .body("not-json".toResponseBody())
-                                    .build()
-                            }.build(),
+                    OkHttpClient.Builder()
+                        .addInterceptor { chain ->
+                            Response.Builder()
+                                .request(chain.request())
+                                .protocol(Protocol.HTTP_1_1)
+                                .code(500)
+                                .message("Server Error")
+                                .body("not-json".toResponseBody())
+                                .build()
+                        }.build(),
                     logger = logger,
                 ),
             )
@@ -154,16 +154,14 @@ class JkanimeRoutingTest {
         assertNull(logger.cause)
     }
 
-    private fun hosterIdsByName(serverNames: List<String>): Map<String, String> =
-        parseHosters(Jkanime(testEnvironment()), response(serverNames))
-            .associate { hoster -> hoster.name to hoster.id }
+    private fun hosterIdsByName(serverNames: List<String>): Map<String, String> = parseHosters(Jkanime(testEnvironment()), response(serverNames))
+        .associate { hoster -> hoster.name to hoster.id }
 
     @Suppress("UNCHECKED_CAST")
-    private fun parseHosters(source: Jkanime, response: Response): List<SHoster> =
-        source.javaClass
-            .getDeclaredMethod("hostersParse", Response::class.java)
-            .apply { isAccessible = true }
-            .invoke(source, response) as List<SHoster>
+    private fun parseHosters(source: Jkanime, response: Response): List<SHoster> = source.javaClass
+        .getDeclaredMethod("hostersParse", Response::class.java)
+        .apply { isAccessible = true }
+        .invoke(source, response) as List<SHoster>
 
     private fun response(serverNames: List<String>): Response {
         val servers = serverNames.mapIndexed { index, name ->
@@ -193,42 +191,40 @@ class JkanimeRoutingTest {
 
             override fun error(message: String, cause: Throwable?) = Unit
         },
-    ) =
-        object : SourceEnvironment {
-            override val httpClient = httpClient
-            override val userAgent = "JkanimeRoutingTest"
-            override val appInfo = HostAppInfo(versionCode = 1, versionName = "test", sdkVersion = 35)
-            override val logger = logger
+    ) = object : SourceEnvironment {
+        override val httpClient = httpClient
+        override val userAgent = "JkanimeRoutingTest"
+        override val appInfo = HostAppInfo(versionCode = 1, versionName = "test", sdkVersion = 35)
+        override val logger = logger
 
-            override fun preferencesFor(namespace: String) =
-                SourcePreferenceValues(
-                    object : SourcePreferenceStore {
-                        override fun getString(key: String, default: String) = default
+        override fun preferencesFor(namespace: String) = SourcePreferenceValues(
+            object : SourcePreferenceStore {
+                override fun getString(key: String, default: String) = default
 
-                        override fun getSecret(key: String, default: String) = default
+                override fun getSecret(key: String, default: String) = default
 
-                        override fun getBoolean(key: String, default: Boolean) = default
+                override fun getBoolean(key: String, default: Boolean) = default
 
-                        override fun getLong(key: String, default: Long) = default
+                override fun getLong(key: String, default: Long) = default
 
-                        override fun getStringSet(key: String, default: Set<String>) = default
+                override fun getStringSet(key: String, default: Set<String>) = default
 
-                        override suspend fun putString(key: String, value: String) = Unit
+                override suspend fun putString(key: String, value: String) = Unit
 
-                        override suspend fun putSecret(key: String, value: String) = Unit
+                override suspend fun putSecret(key: String, value: String) = Unit
 
-                        override suspend fun putBoolean(key: String, value: Boolean) = Unit
+                override suspend fun putBoolean(key: String, value: Boolean) = Unit
 
-                        override suspend fun putLong(key: String, value: Long) = Unit
+                override suspend fun putLong(key: String, value: Long) = Unit
 
-                        override suspend fun putStringSet(key: String, value: Set<String>) = Unit
+                override suspend fun putStringSet(key: String, value: Set<String>) = Unit
 
-                        override suspend fun remove(key: String) = Unit
+                override suspend fun remove(key: String) = Unit
 
-                        override fun observeChanges(): Flow<String> = emptyFlow()
-                    },
-                )
-        }
+                override fun observeChanges(): Flow<String> = emptyFlow()
+            },
+        )
+    }
 
     private class RecordingLogger : SourceLogger {
         var message: String? = null

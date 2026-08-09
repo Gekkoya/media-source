@@ -39,8 +39,8 @@ import org.symera.source.model.ContentType
 import org.symera.source.model.Filter
 import org.symera.source.model.FilterList
 import org.symera.source.model.PageRequest
-import org.symera.source.model.PlayableStream
 import org.symera.source.model.PlayableItemType
+import org.symera.source.model.PlayableStream
 import org.symera.source.model.SContent
 import org.symera.source.model.SHoster
 import org.symera.source.model.SPlayableItem
@@ -514,19 +514,17 @@ class Jkanime(environment: SourceEnvironment) : Source(environment) {
             )
         }
 
-        private fun hosterId(pageIdentity: String, serverIdentity: String): String =
-            JkanimeExtractor.streamId(pageIdentity, "hoster:$serverIdentity")
+        private fun hosterId(pageIdentity: String, serverIdentity: String): String = JkanimeExtractor.streamId(pageIdentity, "hoster:$serverIdentity")
 
-        internal fun stableVoeStreams(hoster: SHoster, streams: List<SStream>): List<SStream> =
-            streams.map { stream ->
-                when (stream) {
-                    is PlayableStream ->
-                        stream.copy(
-                            id = JkanimeExtractor.streamId(hoster.id, "voe|${stream.protocol}|${stream.title.orEmpty()}"),
-                        )
-                    else -> stream
-                }
+        internal fun stableVoeStreams(hoster: SHoster, streams: List<SStream>): List<SStream> = streams.map { stream ->
+            when (stream) {
+                is PlayableStream ->
+                    stream.copy(
+                        id = JkanimeExtractor.streamId(hoster.id, "voe|${stream.protocol}|${stream.title.orEmpty()}"),
+                    )
+                else -> stream
             }
+        }
     }
 }
 

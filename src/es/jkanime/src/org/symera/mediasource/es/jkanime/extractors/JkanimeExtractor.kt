@@ -87,10 +87,9 @@ class JkanimeExtractor(private val client: OkHttpClient) {
     companion object {
         fun streamId(pageIdentity: String, serverIdentity: String): String = "jkanime-${sha256("$pageIdentity|$serverIdentity")}"
 
-        private fun sha256(value: String): String =
-            MessageDigest
-                .getInstance("SHA-256")
-                .digest(value.toByteArray(Charsets.UTF_8))
-                .joinToString("") { byte -> "%02x".format(byte) }
+        private fun sha256(value: String): String = MessageDigest
+            .getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte) }
     }
 }
