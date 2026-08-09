@@ -5,6 +5,5 @@ import org.symera.source.SymeraExtensionFactory
 import org.symera.source.iptv.IptvSource
 
 class RojaDirectaFactory : SymeraExtensionFactory {
-    override fun createIptvSources(environment: SourceEnvironment): List<IptvSource> =
-        listOf(RojaDirectaIptvSource(environment))
+    override fun createIptvSources(environment: SourceEnvironment): List<IptvSource> = listOf(RojaDirectaIptvSource(environment))
 }

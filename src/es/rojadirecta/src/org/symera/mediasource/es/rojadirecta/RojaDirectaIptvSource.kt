@@ -1,6 +1,5 @@
 package org.symera.mediasource.es.rojadirecta
 
-import java.net.URI
 import org.symera.source.SourceEnvironment
 import org.symera.source.SourceIdGenerator
 import org.symera.source.iptv.CompositeIptvSession
@@ -15,7 +14,6 @@ import org.symera.source.iptv.IptvChannelQuery
 import org.symera.source.iptv.IptvConfiguration
 import org.symera.source.iptv.IptvConfiguredChannel
 import org.symera.source.iptv.IptvCredentials
-import org.symera.source.iptv.IptvError
 import org.symera.source.iptv.IptvGroup
 import org.symera.source.iptv.IptvGroupCatalog
 import org.symera.source.iptv.IptvLivePlaybackResolver
@@ -28,6 +26,7 @@ import org.symera.source.iptv.IptvSession
 import org.symera.source.iptv.IptvSessionServices
 import org.symera.source.iptv.IptvSource
 import org.symera.source.iptv.IptvStreamProtocol
+import java.net.URI
 
 private const val SOURCE_NAME = "RojaDirecta"
 private const val SOURCE_LANGUAGE = "es"
