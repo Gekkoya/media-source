@@ -1,0 +1,25 @@
+plugins {
+    id 'symera.plugins.extension' apply false
+}
+
+ext {
+    extName = 'RojaDirecta'
+    extClass = '.RojaDirectaFactory'
+    extVersionCode = 1
+}
+
+apply plugin: 'symera.plugins.extension'
+
+android {
+    sourceSets {
+        test {
+            java.srcDirs = ['test']
+            kotlin.srcDirs = ['test']
+        }
+    }
+}
+
+dependencies {
+    testImplementation(libs.bundles.common)
+    testImplementation(libs.junit)
+}
